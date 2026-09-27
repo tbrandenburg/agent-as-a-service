@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check typecheck test validate-openapi parity format dev start demo
+.PHONY: help install generate openapi catalog parity-doc check typecheck test validate-openapi parity format dev start start-opencode demo-express demo-opencode
 
 help:
 	@printf '%s\n' \
@@ -9,7 +9,9 @@ help:
 	  'format            Format TypeScript source' \
 	  'dev               Start the example Express server in watch mode' \
 	  'start             Start the example Express server' \
-	  'demo              Run an end-to-end simulated workflow walkthrough'
+	  'start-opencode    Start the opencode-backed example server' \
+	  'demo-express      Run the simulated end-to-end workflow walkthrough' \
+	  'demo-opencode     Run the real opencode-backed HTTP walkthrough'
 
 install:
 	npm ci
@@ -52,5 +54,11 @@ dev:
 start:
 	npm start
 
-demo:
-	npm run demo
+start-opencode:
+	npm run start:opencode
+
+demo-express:
+	npm run demo:express
+
+demo-opencode:
+	npm run demo:opencode

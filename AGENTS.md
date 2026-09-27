@@ -9,6 +9,7 @@ This repository defines an engine-neutral REST contract for projects, conversati
 | `packages/contract/` | ts-rest/Zod API contract and resource schemas; independent of the HTTP server and agent provider. |
 | `packages/agent-runtime/` | Optional server-side agent provider interfaces. |
 | `examples/server-express/` | Express server using the official ts-rest adapter; the default backend validates requests and returns 501 for unimplemented resource operations. `src/adapters/demo.ts` provides the in-memory demo backend. |
+| `examples/server-opencode/` | Small in-memory Express backend that runs the authenticated opencode CLI for conversation messages. |
 | `examples/client/` | Typed API client, usage example, and end-to-end demo. |
 | `scripts/` | Generate OpenAPI and the catalog/parity documents; validate the API and Archon route accounting. |
 | `docs/` | API catalog, design decisions, research, event semantics, and parity documentation. |
@@ -32,6 +33,12 @@ This repository defines an engine-neutral REST contract for projects, conversati
 | `make format` | Format TypeScript under `packages/`, `scripts/`, and `examples/`. |
 | `make dev` | Start the Express example in watch mode. |
 | `make start` | Start the Express example server. |
-| `make demo` | Run the simulated end-to-end workflow against an in-memory server. |
+| `make start-opencode` | Start the opencode-backed example server. |
+| `make demo-express` | Run the simulated end-to-end workflow against an in-memory server. |
+| `make demo-opencode` | Run the real opencode-backed HTTP conversation walkthrough. |
 
 When changing the contract, run `make generate` before `make check` and include the regenerated artifacts. Keep provider-specific logic out of `packages/contract/`.
+
+## Lessons Learned
+
+- 2026-09-27: Pitfall: A one-off real-provider failure was initially indistinguishable from an adapter regression. Prevention: reproduce provider failures with the direct CLI, then rerun the HTTP demo before attributing them to integration code.

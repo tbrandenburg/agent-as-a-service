@@ -6,7 +6,7 @@ Use it as a typed API specification when building an agent backend or client. Th
 
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
-> This repository is a contract and example implementation, not a hosted service or a ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The demo backend is in-memory and simulated.
+> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; the separate [`server-opencode`](examples/server-opencode) example runs a real authenticated OpenCode CLI agent.
 
 ## What the contract covers
 
@@ -38,10 +38,10 @@ Requirements: Node.js 22.13 or newer, npm, and Make.
 make install
 make generate
 make check
-make demo
+make demo-express
 ```
 
-`make demo` runs a simulated end-to-end workflow against a temporary in-memory Express server. It exercises project creation, chat, a workflow run, human approval, events, and an artifact; all state disappears when the process exits.
+`make demo-express` runs a simulated end-to-end workflow against a temporary in-memory Express server. It exercises project creation, chat, a workflow run, human approval, events, and an artifact; all state disappears when the process exits. `make demo-opencode` runs the real CLI-backed conversation integration and requires OpenCode to be installed and authenticated; see [`examples/server-opencode/README.md`](examples/server-opencode/README.md).
 
 To start the default example server instead:
 
@@ -58,8 +58,10 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make install` | Install locked workspace dependencies. |
 | `make generate` | Regenerate OpenAPI, catalog, and REST parity documents. |
 | `make check` | Run typecheck, tests, OpenAPI/parity validation, and formatting checks. |
-| `make demo` | Run the simulated HTTP walkthrough. |
+| `make demo-express` | Run the simulated HTTP walkthrough. |
+| `make demo-opencode` | Run the real OpenCode-backed HTTP walkthrough. |
 | `make start` / `make dev` | Start the Express example normally or in watch mode. |
+| `make start-opencode` | Start the OpenCode-backed example server. |
 | `make help` | List the main targets. |
 
 The complete command list is in [`Makefile`](Makefile). After changing the contract, run `make generate` before `make check` and commit the generated files.
@@ -103,6 +105,7 @@ The provider shape is informed by Archon’s [`IAgentProvider` architecture](htt
 - `packages/contract` — engine-neutral REST contract and schemas.
 - `packages/agent-runtime` — optional TypeScript provider interface.
 - `examples/server-express` — Express transport, default backend, and simulated demo backend.
+- `examples/server-opencode` — small in-memory HTTP backend using the real OpenCode CLI.
 - `examples/client` — typed client, usage sample, and demo runner.
 - `scripts` — OpenAPI/catalog/parity generation and validation.
 - `docs` — API design, event semantics, research, and route accounting.
