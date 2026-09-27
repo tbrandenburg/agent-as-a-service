@@ -1,0 +1,5 @@
+{
+  "name": "@agent-as-a-service/server-opencode",
+  "private": true,
+  "type": "module"
+}
