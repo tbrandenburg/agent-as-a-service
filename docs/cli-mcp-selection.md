@@ -1,0 +1,3 @@
+# Scope of non-REST capabilities
+
+Archon also offers CLI and native MCP tools. This API defines **REST operations only**. Run start, list/get, cancel, resume and approval actions are included because they form ordinary HTTP run lifecycles and appear on Archon's REST surface already. CLI-only run logs and read-only resume eligibility were considered and omitted: events plus run details cover progress, and resume can report an invalid transition with 409. Worktree cleanup, diagnostics, disk workflows, tool help and install/serve commands remain implementation or machine concerns. No CLI or MCP operation is copied into the public contract.

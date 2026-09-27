@@ -1,0 +1,13 @@
+{
+  "name": "@agent-as-a-service/example-server-express",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@agent-as-a-service/agent-runtime": "0.1.0",
+    "@agent-as-a-service/contract": "0.1.0",
+    "@ts-rest/express": "3.52.1",
+    "express": "^4.22.3"
+  }
+}

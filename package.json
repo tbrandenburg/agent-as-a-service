@@ -1,0 +1,39 @@
+{
+  "name": "agent-as-a-service",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "openapi": "node --import tsx scripts/openapi.ts",
+    "start": "node --import tsx examples/server-express/src/main.ts",
+    "demo": "node --import tsx examples/client/demo.ts",
+    "dev": "node --watch --import tsx examples/server-express/src/main.ts",
+    "validate:openapi": "node --import tsx scripts/validate-openapi.ts",
+    "check:parity": "node --import tsx scripts/check-parity.ts",
+    "catalog": "node --import tsx scripts/catalog.ts",
+    "parity:doc": "node --import tsx scripts/parity-doc.ts",
+    "format": "prettier --write \"packages/**/*.ts\" \"scripts/**/*.ts\" \"examples/**/*.ts\"",
+    "format:check": "prettier --check \"packages/**/*.ts\" \"scripts/**/*.ts\" \"examples/**/*.ts\""
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "@types/express": "^4.17.25",
+    "@types/node": "^24.0.0",
+    "@types/supertest": "^6.0.3",
+    "prettier": "^3.9.9",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.2",
+    "zod-openapi": "^4.2.4",
+    "zod": "^3.25.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

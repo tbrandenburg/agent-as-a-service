@@ -1,0 +1,77 @@
+# Archon REST parity map
+
+Source snapshot: Archon `dev` commit `879c99fe4dceeeae1bef98869e9427f38aadeea4`. This table maps **capabilities**, not identical wire formats. `EXCLUDED` rows record deliberate source-specific omissions. Every named operation is defined in the independent versioned TypeScript contract. The example server responds `501` for resource operations; health, authenticated status and OpenAPI return `200`.
+
+| Archon HTTP route | Independent operation |
+| --- | --- |
+| `GET /api/workflows` | `listWorkflows` |
+| `POST /api/workflows/validate` | `validateWorkflow` |
+| `GET /api/workflows/{name}` | `getWorkflow` |
+| `PUT /api/workflows/{name}` | `createWorkflow / updateWorkflow` |
+| `DELETE /api/workflows/{name}` | `deleteWorkflow` |
+| `GET /api/commands` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/conversations` | `listConversations` |
+| `GET /api/conversations/{id}` | `getConversation` |
+| `POST /api/conversations` | `createConversation` |
+| `PATCH /api/conversations/{id}` | `updateConversation` |
+| `DELETE /api/conversations/{id}` | `deleteConversation` |
+| `GET /api/conversations/{id}/messages` | `listMessages` |
+| `POST /api/conversations/{id}/message` | `sendMessage` |
+| `GET /api/codebases` | `listProjects` |
+| `GET /api/codebases/{id}` | `getProject` |
+| `POST /api/codebases` | `createProject` |
+| `DELETE /api/codebases/{id}` | `deleteProject` |
+| `GET /api/codebases/{id}/env` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PUT /api/codebases/{id}/env` | `EXCLUDED: Outside the stable core REST contract.` |
+| `DELETE /api/codebases/{id}/env/{key}` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/workflows/{name}/run` | `startRun` |
+| `GET /api/runs/{runId}/artifacts` | `listArtifacts` |
+| `GET /api/dashboard/runs` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/workflows/runs/by-worker/{platformId}` | `EXCLUDED: Internal worker identity lookup; clients use run IDs.` |
+| `GET /api/workflows/runs` | `listRuns` |
+| `POST /api/workflows/runs/{runId}/cancel` | `cancelRun` |
+| `POST /api/workflows/runs/{runId}/resume` | `resumeRun` |
+| `POST /api/workflows/runs/{runId}/signal` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/workflows/runs/{runId}/abandon` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/workflows/runs/{runId}/approve` | `submitInteractionDecision` |
+| `POST /api/workflows/runs/{runId}/reject` | `submitInteractionDecision` |
+| `POST /api/workflows/runs/{runId}/respond` | `submitInteractionDecision` |
+| `DELETE /api/workflows/runs/{runId}` | `deleteRun` |
+| `DELETE /api/workflows/{name}/node-sessions` | `EXCLUDED: Engine-owned provider session cleanup has no portable REST semantics.` |
+| `GET /api/workflows/runs/{runId}` | `getRun` |
+| `GET /api/config` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PATCH /api/config/assistants` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PATCH /api/config/tiers` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PATCH /api/config/aliases` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/providers/pi/models` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/providers` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/providers/opencode/credentials` | `EXCLUDED: OpenCode backend credentials belong to an implementation, not the public contract.` |
+| `GET /api/auth/status` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/auth/github/device/start` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/auth/github/device/poll` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/auth/github` | `EXCLUDED: Outside the stable core REST contract.` |
+| `DELETE /api/auth/github` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/auth/providers` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PUT /api/auth/providers/{provider}` | `EXCLUDED: Outside the stable core REST contract.` |
+| `DELETE /api/auth/providers/{provider}` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/auth/providers/{provider}/oauth/start` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /api/auth/providers/{provider}/oauth/poll` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/auth/me/ai-prefs` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PATCH /api/auth/me/ai-prefs/tiers` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PATCH /api/auth/me/ai-prefs/aliases` | `EXCLUDED: Outside the stable core REST contract.` |
+| `PATCH /api/auth/me/ai-prefs/default` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/codebases/{id}/environments` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/health` | `getHealth` |
+| `GET /api/update-check` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/stream/__dashboard__` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/stream/{conversationId}` | `streamConversationEvents` |
+| `GET /api/artifacts/{runId}/{path}` | `getArtifact` |
+| `POST /webhooks/github` | `EXCLUDED: Outside the stable core REST contract.` |
+| `POST /webhooks/sources/{sourceInstanceId}` | `EXCLUDED: Outside the stable core REST contract.` |
+| `GET /api/openapi.json` | `getOpenApiDocument` |
+
+## Core scope
+
+This snapshot accounts for all 65 Archon REST routes; `EXCLUDED` means intentionally outside the small, stable REST core, not an implementation claim. Workflow discovery maps to listing definitions. Archon-specific admin, provider, OAuth, environment, webhook and dashboard-wide streaming features can be added later when the server and use case require them. Conversation streaming has a separate core operation.
+
+Archon codebases map to optional, more general projects; their repository URL is optional. Projects, conversations, workflows and runs remain independent resources. Run details expose optional executions and interactions without prescribing an engine node schema. Poll or stream ordered run events for progress; terminal output or error is available from the run. Server-provided workflows appear in the existing list with `readOnly: true`. A project may optionally identify a server-side local path.
