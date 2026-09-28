@@ -41,7 +41,7 @@ make check
 make demo-express
 ```
 
-`make demo-express` runs a simulated end-to-end workflow against a temporary in-memory Express server. It exercises project creation, chat, a workflow run, human approval, events, and an artifact; all state disappears when the process exits. `make demo-opencode` builds and starts the Dockerized CLI-backed contract server and checks it through `http://127.0.0.1:3092`; it requires Docker Compose and outbound model access, but no host OpenCode CLI or provider credentials. Supply the contract's runtime bearer token with `API_TOKEN`; see [`examples/server-opencode/README.md`](examples/server-opencode/README.md).
+`make demo-express` runs a simulated end-to-end workflow against a temporary in-memory Express server. It exercises project creation, chat, a workflow run, human approval, events, and an artifact; all state disappears when the process exits. `make demo-opencode` builds and starts the Dockerized CLI-backed contract server and walks through authenticated conversation, real Big Pickle replies, runs, ordered events, and session continuation at `http://127.0.0.1:3092`. It shows expected rejection checks separately; projects, workflows, approvals, and artifacts are not implemented in that example. It requires Docker Compose and outbound model access, but no host OpenCode CLI or provider credentials. Supply the contract's runtime bearer token with `API_TOKEN`; see [`examples/server-opencode/README.md`](examples/server-opencode/README.md).
 
 To start the default example server instead:
 
