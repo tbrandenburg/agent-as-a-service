@@ -23,12 +23,15 @@ That is **30 resource operations and 3 service operations**. The contract also s
 
 - Typed requests, responses, and errors with ts-rest and Zod.
 - Run acceptance that makes the returned run immediately readable.
+- Optional run-detail `conversations` links for discovering public conversations created during execution; omitted for legacy responses and runs whose backend cannot track them.
 - Optional idempotency keys for safe retries and ETags for workflow updates.
 - Ordered run and conversation events, including resumable SSE semantics.
 - Human decisions for runs that need approval or feedback.
 - Generated OpenAPI, with portable event payloads described in extensions.
 
 The API contract is the source of truth. The Express server, typed client, and demo are examples that can be replaced independently.
+
+`GET /api/v1/runs/:runId` can include `conversations: [{ conversationId: "generated-1", nodeId: "review" }]` alongside `run`. When provided, this is the complete snapshot of public conversation IDs linked to that run; `nodeId` is optional and opaque. The optional `run.conversationId` remains usable by older clients and, if non-null alongside the list, must appear in it. An omitted list does not assert that no other conversations exist; `[]` explicitly reports none at that moment. Use the existing conversation and messages routes to read each linked ID. See [design decisions](docs/design.md) for the snapshot and authorization rules.
 
 ## Try it locally
 

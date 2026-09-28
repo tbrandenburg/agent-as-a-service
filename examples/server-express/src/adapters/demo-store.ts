@@ -134,6 +134,9 @@ export class DemoStore {
     const run = this.runs.get(runId)!;
     return {
       run,
+      ...(run.conversationId && this.conversations.has(run.conversationId)
+        ? { conversations: [{ conversationId: run.conversationId }] }
+        : {}),
       interactions: [...this.interactions.values()].filter(
         (item) => item.runId === runId,
       ),
