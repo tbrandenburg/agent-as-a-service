@@ -6,7 +6,7 @@ Use it as a typed API specification when building an agent backend or client. Th
 
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
-> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; the separate [`server-opencode`](examples/server-opencode) example runs a real authenticated OpenCode CLI agent.
+> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; the separate [`server-opencode`](examples/server-opencode) example exposes the contract in Docker and runs the fixed OpenCode `opencode/big-pickle` model for conversation messages.
 
 ## What the contract covers
 
@@ -41,7 +41,7 @@ make check
 make demo-express
 ```
 
-`make demo-express` runs a simulated end-to-end workflow against a temporary in-memory Express server. It exercises project creation, chat, a workflow run, human approval, events, and an artifact; all state disappears when the process exits. `make demo-opencode` runs the real CLI-backed conversation integration and requires OpenCode to be installed and authenticated; see [`examples/server-opencode/README.md`](examples/server-opencode/README.md).
+`make demo-express` runs a simulated end-to-end workflow against a temporary in-memory Express server. It exercises project creation, chat, a workflow run, human approval, events, and an artifact; all state disappears when the process exits. `make demo-opencode` builds and starts the Dockerized CLI-backed contract server and checks it through `http://127.0.0.1:3092`; it requires Docker Compose and outbound model access, but no host OpenCode CLI or provider credentials. Supply the contract's runtime bearer token with `API_TOKEN`; see [`examples/server-opencode/README.md`](examples/server-opencode/README.md).
 
 To start the default example server instead:
 
@@ -59,9 +59,9 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make generate` | Regenerate OpenAPI, catalog, and REST parity documents. |
 | `make check` | Run typecheck, tests, OpenAPI/parity validation, and formatting checks. |
 | `make demo-express` | Run the simulated HTTP walkthrough. |
-| `make demo-opencode` | Run the real OpenCode-backed HTTP walkthrough. |
+| `make demo-opencode` | Build Docker and run the real published-port OpenCode walkthrough. |
 | `make start` / `make dev` | Start the Express example normally or in watch mode. |
-| `make start-opencode` | Start the OpenCode-backed example server. |
+| `make start-opencode` | Start the OpenCode-backed example server locally. |
 | `make help` | List the main targets. |
 
 The complete command list is in [`Makefile`](Makefile). After changing the contract, run `make generate` before `make check` and commit the generated files.

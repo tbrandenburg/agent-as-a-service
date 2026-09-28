@@ -1,29 +1,33 @@
 # OpenCode-backed server example
 
-A deliberately small, in-memory Express backend that runs one real `opencode run` process per conversation message. It is an example of the REST contract, not a hosted service.
+A deliberately small, in-memory Express backend that exposes the repository's complete engine-neutral REST contract and runs one real `opencode run` process per conversation message. It is an example, not a hosted service. Implemented conversation/message/run/event operations use the OpenCode CLI; unsupported resource operations retain typed `501` responses.
 
-## Requirements and configuration
+## Requirements and model
 
-- Node.js 22.13+, npm, and a working `opencode` CLI installation.
-- OpenCode must be authenticated with a provider that can answer prompts. The default model is `opencode/big-pickle`; set `OPENCODE_MODEL` to a model available in your installation if needed.
-- `API_TOKEN` configures bearer authentication (default `dev-token`).
-- `OPENCODE_DIR` selects the process working directory (default current directory) and must exist.
-- `OPENCODE_TIMEOUT_MS` sets the finite CLI timeout (default `300000`).
-- `HOST` and `PORT` configure the server (defaults `127.0.0.1:3092`, distinct from the Express example's port).
+- Docker Engine with Compose v2, Make, curl, Node.js 22.13+, and npm for the host-side demo client.
+- The image pins `opencode-ai` 1.18.33 and fixes the model to `opencode/big-pickle`. No host OpenCode installation, OpenCode login, `auth.json`, or provider API key is used. The CLI reaches the hosted model over outbound network access. OpenCode documents Big Pickle as free for a limited time; availability and terms may change.
+- `API_TOKEN` is the HTTP API bearer token, separate from provider authentication. Supply it at runtime (`dev-token` is the local Compose default); the Docker image does not contain it.
 
-The server owns the CLI cwd and model. HTTP requests cannot choose an engine, agent, model, working directory, or engine options. Only plain text conversation messages are forwarded; content parts are rejected. Conversation and provider-session state exists only in memory and is lost when the process exits. Other contract operations use the typed 501 fallback.
-
-## Run
+## Docker walkthrough
 
 ```sh
 make install
-make demo-opencode
+API_TOKEN=dev-token make demo-opencode
 ```
 
-`make demo-opencode` starts an ephemeral authenticated HTTP server, creates a conversation, submits a prompt, reads the accepted run immediately, polls for the real assistant response and ordered events, then asks for a distinctive first-turn marker and verifies the returned session ID confirms continuation. To run a persistent server instead:
+`make demo-opencode` builds from the repository root, starts an isolated Compose project, waits up to 60 seconds for readiness, runs the host HTTP client against the published `http://127.0.0.1:3092` endpoint, then removes that project on success, error, or interruption. The demo exercises public `/api/v1/health` and `/api/v1/openapi.json`, authenticated contract routes, real conversation runs, ordered events, and resumed sessions. Port 3092 must be free; if it is occupied, stop only the service that owns it before retrying. The host demo needs Node/npm dependencies from `make install`, but never the host OpenCode CLI.
+
+To start the service for manual requests and stop it:
 
 ```sh
-API_TOKEN=dev-token make start-opencode
+API_TOKEN=dev-token docker compose -f examples/server-opencode/compose.yaml up --build -d
+curl http://127.0.0.1:3092/api/v1/health
+curl http://127.0.0.1:3092/api/v1/openapi.json
+docker compose -f examples/server-opencode/compose.yaml down
 ```
 
-`make demo-express` remains the simulated walkthrough and does not require OpenCode.
+Authenticated routes use `Authorization: Bearer $API_TOKEN`. Compose publishes only on localhost, fixes the container listener to `0.0.0.0:3092`, stores the OpenCode working directory at `/workspace`, and starts Node in the foreground with a tiny init to reap CLI children. It does not mount a host project or OpenCode configuration. For intentional workspace use, add a bind mount at `/workspace`; that workspace is writable by the non-root `node` user.
+
+Conversation and OpenCode session mapping is in memory. Restarting the HTTP backend loses conversations and their mapping even if OpenCode session files happen to persist in the container. Stopping the container terminates active requests and their CLI children; the init process reaps those children. The demo container has no persistent volume, so its filesystem state is discarded at shutdown.
+
+`make demo-express` remains the independent simulated walkthrough and does not require Docker or OpenCode.
