@@ -15,7 +15,7 @@ make install
 API_TOKEN=dev-token make demo-opencode
 ```
 
-`make demo-opencode` builds from the repository root, starts an isolated Compose project, waits up to 60 seconds for readiness, runs the host HTTP client against the published `http://127.0.0.1:3092` endpoint, then removes that project on success, error, or interruption. The demo exercises public `/api/v1/health` and `/api/v1/openapi.json`, authenticated contract routes, real conversation runs, ordered events, and resumed sessions. Port 3092 must be free; if it is occupied, stop only the service that owns it before retrying. The host demo needs Node/npm dependencies from `make install`, but never the host OpenCode CLI.
+`make demo-opencode` builds from the repository root, starts an isolated Compose project, waits up to 60 seconds for readiness, runs the host HTTP client against the published `http://127.0.0.1:3092` endpoint, then removes that project on success, error, or interruption. Its numbered walkthrough discovers the public health/OpenAPI routes, authenticates to the HTTP contract, opens a conversation, gets substantive real Big Pickle advice, verifies idempotency and ordered run events, then confirms a second-turn reply recalls context in a resumed session. Missing/wrong bearer tokens and unsupported operations are shown as **expected rejection checks**; the walkthrough ends with a success summary. Projects, workflows, approvals, and artifacts remain unimplemented in this example; use `make demo-express` for that simulated journey. Port 3092 must be free; if it is occupied, stop only the service that owns it before retrying. The host demo needs Node/npm dependencies from `make install`, but never the host OpenCode CLI.
 
 To start the service for manual requests and stop it:
 
