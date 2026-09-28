@@ -64,7 +64,10 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | --- | --- |
 | `make install` | Install locked workspace dependencies. |
 | `make generate` | Regenerate OpenAPI, catalog, and REST parity documents. |
-| `make check` | Run typecheck, tests, OpenAPI/parity validation, and formatting checks. |
+| `make check` | Run lint, typecheck, tests, OpenAPI/parity validation, and formatting checks. |
+| `make security` | Audit the root and Node-RED agent npm lockfiles. |
+| `make lint` | Lint TypeScript source with Oxlint. |
+| `make format-check` | Check TypeScript formatting with Prettier. |
 | `make demo-express` | Run the simulated HTTP walkthrough. |
 | `make demo-opencode` | Build Docker and run the real published-port OpenCode walkthrough. |
 | `make demo-node-red` | Build Docker and run the private Node-RED workflow walkthrough. |
@@ -75,6 +78,8 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make help` | List the main targets. |
 
 The complete command list is in [`Makefile`](Makefile). After changing the contract, run `make generate` before `make check` and commit the generated files.
+
+GitHub Actions runs four independent `Checks` jobs on pushes and pull requests: Security (`make security`), Lint (`make lint`), Format (`make format-check`), and Tests (`make typecheck`, `make test`, `make validate-openapi`, `make parity`). Security audits both the root and Node-RED agent lockfiles. Install dependencies with `make install` before running individual checks locally. Docker-backed walkthroughs remain separate manual checks.
 
 ## Build a client or server
 
