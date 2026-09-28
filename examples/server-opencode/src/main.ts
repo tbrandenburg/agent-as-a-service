@@ -11,6 +11,8 @@ const timeoutMs = Number(process.env.OPENCODE_TIMEOUT_MS ?? 300_000);
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
   throw new Error("OPENCODE_TIMEOUT_MS must be a positive integer");
 const model = process.env.OPENCODE_MODEL ?? "opencode/big-pickle";
+if (model !== "opencode/big-pickle")
+  throw new Error("OPENCODE_MODEL is fixed to opencode/big-pickle");
 const token = process.env.API_TOKEN ?? "dev-token";
 const port = Number(process.env.PORT ?? 3092);
 const host = process.env.HOST ?? "127.0.0.1";

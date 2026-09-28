@@ -9,7 +9,7 @@ This repository defines an engine-neutral REST contract for projects, conversati
 | `packages/contract/` | ts-rest/Zod API contract and resource schemas; independent of the HTTP server and agent provider. |
 | `packages/agent-runtime/` | Optional server-side agent provider interfaces. |
 | `examples/server-express/` | Express server using the official ts-rest adapter; the default backend validates requests and returns 501 for unimplemented resource operations. `src/adapters/demo.ts` provides the in-memory demo backend. |
-| `examples/server-opencode/` | Small in-memory Express backend that runs the authenticated opencode CLI for conversation messages. |
+| `examples/server-opencode/` | Dockerized in-memory Express contract backend that runs the fixed `opencode/big-pickle` CLI for conversation messages. |
 | `examples/client/` | Typed API client, usage example, and end-to-end demo. |
 | `scripts/` | Generate OpenAPI and the catalog/parity documents; validate the API and Archon route accounting. |
 | `docs/` | API catalog, design decisions, research, event semantics, and parity documentation. |
@@ -33,9 +33,11 @@ This repository defines an engine-neutral REST contract for projects, conversati
 | `make format` | Format TypeScript under `packages/`, `scripts/`, and `examples/`. |
 | `make dev` | Start the Express example in watch mode. |
 | `make start` | Start the Express example server. |
-| `make start-opencode` | Start the opencode-backed example server. |
+| `make start-opencode` | Start the local OpenCode-backed example server; Docker Compose lifecycle is documented in `examples/server-opencode/README.md`. |
 | `make demo-express` | Run the simulated end-to-end workflow against an in-memory server. |
-| `make demo-opencode` | Run the real opencode-backed HTTP conversation walkthrough. |
+| `make demo-opencode` | Build Docker and run the real opencode-backed HTTP walkthrough through its localhost published port; requires Docker Compose, curl, host Node/npm, and outbound model access, but no host OpenCode CLI or provider credentials. |
+
+The OpenCode Docker example exposes the complete contract. Conversation/message/run/event operations use an in-memory backend; other resource operations return typed `501`. HTTP routes require a runtime `API_TOKEN`; the fixed Big Pickle model does not require provider authentication. Restarting the backend loses conversation-to-OpenCode-session mappings, and the demo container is ephemeral. Port 3092 must be free for `make demo-opencode`.
 
 When changing the contract, run `make generate` before `make check` and include the regenerated artifacts. Keep provider-specific logic out of `packages/contract/`.
 
