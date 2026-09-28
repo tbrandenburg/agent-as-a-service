@@ -1,0 +1,5 @@
+{
+  "name": "@agent-as-a-service/server-node-red-agents",
+  "private": true,
+  "type": "module"
+}

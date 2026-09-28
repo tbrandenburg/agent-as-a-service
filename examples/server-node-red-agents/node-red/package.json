@@ -1,0 +1,7 @@
+{
+  "name": "aas-node-red-agents-flow",
+  "private": true,
+  "dependencies": {
+    "@tbrandenburg/node-red-agents": "0.4.2"
+  }
+}
