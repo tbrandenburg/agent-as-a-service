@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check typecheck test validate-openapi parity format dev start start-opencode demo-express demo-opencode
+.PHONY: help install generate openapi catalog parity-doc check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red
 
 help:
 	@printf '%s\n' \
@@ -10,8 +10,10 @@ help:
 	  'dev               Start the example Express server in watch mode' \
 	  'start             Start the example Express server' \
 	  'start-opencode    Start the opencode-backed example server' \
+	  'start-node-red    Start the Node-RED-backed API server locally' \
 	  'demo-express      Run the simulated end-to-end workflow walkthrough' \
-	  'demo-opencode     Build Docker and run the real published-port walkthrough'
+	  'demo-opencode     Build Docker and run the real published-port walkthrough' \
+	  'demo-node-red     Build Docker and run the real Node-RED walkthrough'
 
 install:
 	npm ci
@@ -57,6 +59,9 @@ start:
 start-opencode:
 	npm run start:opencode
 
+start-node-red:
+	npm run start:node-red
+
 demo-express:
 	npm run demo:express
 
@@ -76,3 +81,22 @@ demo-opencode:
 	done; \
 	if [ "$$ready" -ne 1 ]; then docker compose -p "$$project" -f examples/server-opencode/compose.yaml logs; exit 1; fi; \
 	DEMO_BASE_URL=http://127.0.0.1:3092 npm run demo:opencode
+
+demo-node-red:
+	@set -eu; \
+	listeners="$$(ss -H -ltn '( sport = :3093 )')"; \
+	if [ -n "$$listeners" ]; then printf '%s\n' 'Port 3093 is occupied; refusing to start Compose'; exit 1; fi; \
+	project="aas-node-red-demo-$$$$"; \
+	export API_TOKEN="$${API_TOKEN:-dev-token}"; \
+	cleanup() { docker compose -p "$$project" -f examples/server-node-red/compose.yaml down --volumes --remove-orphans; }; \
+	trap cleanup EXIT; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
+	docker compose -p "$$project" -f examples/server-node-red/compose.yaml up --build -d; \
+	ready=0; \
+	for attempt in $$(seq 1 90); do \
+	  if curl --fail --silent http://127.0.0.1:3093/api/v1/health >/dev/null; then ready=1; break; fi; \
+	  sleep 1; \
+	done; \
+	if [ "$$ready" -ne 1 ]; then docker compose -p "$$project" -f examples/server-node-red/compose.yaml logs; exit 1; fi; \
+	DEMO_BASE_URL=http://127.0.0.1:3093 npm run demo:node-red

@@ -1,0 +1,25 @@
+services:
+  server-node-red:
+    build:
+      context: ../..
+      dockerfile: examples/server-node-red/Dockerfile
+    init: true
+    environment:
+      API_TOKEN: ${API_TOKEN:-dev-token}
+      HOST: 0.0.0.0
+      PORT: "3093"
+      NODE_RED_URL: http://node-red:1880
+    ports:
+      - "127.0.0.1:3093:3093"
+    depends_on:
+      node-red:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3093/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  node-red:
+    image: nodered/node-red:5.0.7
+    volumes:
+      - ./node-red/flows.json:/data/flows.json:ro

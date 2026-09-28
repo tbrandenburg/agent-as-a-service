@@ -1,0 +1,43 @@
+[
+  {
+    "id": "demo-tab",
+    "type": "tab",
+    "label": "AaaS demo",
+    "disabled": false,
+    "info": "Fixed private workflow for the AaaS contract example"
+  },
+  {
+    "id": "demo-http-in",
+    "type": "http in",
+    "z": "demo-tab",
+    "name": "Private workflow input",
+    "url": "/workflow/demo",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "wires": [["demo-function"]]
+  },
+  {
+    "id": "demo-function",
+    "type": "function",
+    "z": "demo-tab",
+    "name": "Process text",
+    "func": "const text = msg.payload?.input?.text;\nif (typeof text !== 'string' || !text.trim()) {\n    msg.statusCode = 400;\n    msg.payload = { error: 'Invalid text' };\n} else {\n    msg.payload = { output: `Node-RED processed: ${text}` };\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "wires": [["demo-http-response"]]
+  },
+  {
+    "id": "demo-http-response",
+    "type": "http response",
+    "z": "demo-tab",
+    "name": "Private workflow result",
+    "statusCode": "",
+    "headers": {},
+    "wires": []
+  }
+]
