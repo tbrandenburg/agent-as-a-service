@@ -335,7 +335,7 @@ describe("Node-RED agents HTTP boundary", () => {
       sessionID: string;
     }) => void;
     const backend = new AgentsBackend(
-      async (_path, payload) =>
+      async (_path, _payload) =>
         await new Promise((resolve) => {
           complete = resolve;
         }),

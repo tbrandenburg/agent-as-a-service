@@ -1,11 +1,14 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents
+.PHONY: help install generate openapi catalog parity-doc check security lint format-check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents
 
 help:
 	@printf '%s\n' \
 	  'install           Install workspace dependencies from the lockfile' \
 	  'generate          Regenerate OpenAPI, catalog and Archon parity document' \
-	  'check             Run typecheck, tests, OpenAPI/parity validation and format check' \
+	  'check             Run lint, typecheck, tests, OpenAPI/parity and format checks' \
+	  'security          Audit root and Node-RED agent npm dependencies' \
+	  'lint              Lint TypeScript source with Oxlint' \
+	  'format-check      Check TypeScript formatting with Prettier' \
 	  'format            Format TypeScript source' \
 	  'dev               Start the example Express server in watch mode' \
 	  'start             Start the example Express server' \
@@ -33,7 +36,16 @@ catalog:
 parity-doc:
 	npm run parity:doc
 
-check: typecheck test validate-openapi parity
+check: lint typecheck test validate-openapi parity format-check
+
+security:
+	npm audit
+	npm audit --prefix examples/server-node-red-agents/node-red
+
+lint:
+	npm run lint
+
+format-check:
 	npm run format:check
 
 typecheck:
