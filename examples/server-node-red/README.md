@@ -8,7 +8,7 @@ make check
 API_TOKEN=dev-token make demo-node-red
 ```
 
-Requires Docker Engine with Compose v2, Node.js 22.13+, npm, Make, curl, and `ss` on the host. No host Node-RED installation is needed. Port 3093 must be free. The numbered host-side HTTP walkthrough verifies public health/OpenAPI, bearer authentication, workflow discovery and validation, run acceptance and real flow output, ordered lifecycle events, and expected rejection responses. The demo starts an isolated Compose project and removes it on success, failure, or interruption.
+Requires Docker Engine with Compose v2, Node.js 22.13+, npm, Make, curl, and `ss` on the host. No host Node-RED installation is needed. Port 3093 must be free. The demo waits for public health and the private Node-RED flow's `/ready` endpoint before the walkthrough. The numbered host-side HTTP walkthrough verifies public health/OpenAPI, bearer authentication, workflow discovery and validation, run acceptance and real flow output, ordered lifecycle events, and expected rejection responses. The demo starts an isolated Compose project and removes it on success, failure, or interruption.
 
 For manual startup:
 

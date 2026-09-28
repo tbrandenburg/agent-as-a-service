@@ -108,7 +108,7 @@ demo-node-red:
 	docker compose -p "$$project" -f examples/server-node-red/compose.yaml up --build -d; \
 	ready=0; \
 	for attempt in $$(seq 1 90); do \
-	  if curl --fail --silent http://127.0.0.1:3093/api/v1/health >/dev/null; then ready=1; break; fi; \
+	  if curl --fail --silent http://127.0.0.1:3093/api/v1/health >/dev/null && docker compose -p "$$project" -f examples/server-node-red/compose.yaml exec -T node-red node -e "fetch('http://127.0.0.1:1880/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then ready=1; break; fi; \
 	  sleep 1; \
 	done; \
 	if [ "$$ready" -ne 1 ]; then docker compose -p "$$project" -f examples/server-node-red/compose.yaml logs; exit 1; fi; \

@@ -7,6 +7,24 @@
     "info": "Fixed private workflow for the AaaS contract example"
   },
   {
+    "id": "ready-http-in",
+    "type": "http in",
+    "z": "demo-tab",
+    "name": "Flow ready",
+    "url": "/ready",
+    "method": "get",
+    "wires": [["ready-body"]]
+  },
+  {
+    "id": "ready-body",
+    "type": "function",
+    "z": "demo-tab",
+    "name": "Ready",
+    "func": "msg.payload = { ready: true }; return msg;",
+    "outputs": 1,
+    "wires": [["demo-http-response"]]
+  },
+  {
     "id": "demo-http-in",
     "type": "http in",
     "z": "demo-tab",
