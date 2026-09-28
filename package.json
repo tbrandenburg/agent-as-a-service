@@ -13,6 +13,8 @@
     "start": "node --import tsx examples/server-express/src/main.ts",
     "demo:express": "node --import tsx examples/client/demo.ts",
     "demo:opencode": "node --import tsx examples/server-opencode/src/demo.ts",
+    "demo:node-red": "node --import tsx examples/server-node-red/src/demo.ts",
+    "start:node-red": "node --import tsx examples/server-node-red/src/main.ts",
     "start:opencode": "node --import tsx examples/server-opencode/src/main.ts",
     "dev": "node --watch --import tsx examples/server-express/src/main.ts",
     "validate:openapi": "node --import tsx scripts/validate-openapi.ts",
