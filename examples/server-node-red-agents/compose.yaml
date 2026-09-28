@@ -1,0 +1,22 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: examples/server-node-red-agents/Dockerfile
+    init: true
+    environment:
+      API_TOKEN: ${API_TOKEN:-dev-token}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-checkpoint-demo-token}
+      NODE_RED_URL: http://node-red:1880
+    ports:
+      - "127.0.0.1:3094:3094"
+    depends_on:
+      node-red:
+        condition: service_started
+  node-red:
+    build:
+      context: ../..
+      dockerfile: examples/server-node-red-agents/node-red/Dockerfile
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-checkpoint-demo-token}
+    # Admin API and internal checkpoint port are only reachable on the Compose network.

@@ -6,7 +6,7 @@ Use it as a typed API specification when building an agent backend or client. Th
 
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
-> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; [`server-opencode`](examples/server-opencode) runs OpenCode for conversation messages, and [`server-node-red`](examples/server-node-red) runs one fixed workflow through a private Node-RED container.
+> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; [`server-opencode`](examples/server-opencode) runs OpenCode for conversation messages, [`server-node-red`](examples/server-node-red) runs one fixed workflow through a private Node-RED container, and [`server-node-red-agents`](examples/server-node-red-agents) runs a fixed writer → reviewer flow with private checkpointing.
 
 ## What the contract covers
 
@@ -48,6 +48,8 @@ make demo-express
 
 `API_TOKEN=dev-token make demo-node-red` builds two Docker containers and walks through the unchanged authenticated workflow/run contract at `http://127.0.0.1:3093`. Node-RED stays private; the host needs Docker Compose, curl, Node/npm, Make, and `ss`, but no Node-RED installation. See [`examples/server-node-red/README.md`](examples/server-node-red/README.md).
 
+`API_TOKEN=dev-token make demo-node-red-agents` runs the Dockerized, real `opencode/big-pickle` writer/reviewer workflow at `http://127.0.0.1:3094` with no provider credentials. See [`examples/server-node-red-agents/README.md`](examples/server-node-red-agents/README.md) for input conventions, version pins, checkpoint behavior, and limits.
+
 To start the default example server instead:
 
 ```sh
@@ -66,6 +68,7 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make demo-express` | Run the simulated HTTP walkthrough. |
 | `make demo-opencode` | Build Docker and run the real published-port OpenCode walkthrough. |
 | `make demo-node-red` | Build Docker and run the private Node-RED workflow walkthrough. |
+| `make demo-node-red-agents` | Build Docker and run the real writer/reviewer walkthrough. |
 | `make start` / `make dev` | Start the Express example normally or in watch mode. |
 | `make start-opencode` | Start the OpenCode-backed example server locally. |
 | `make start-node-red` | Start the Node-RED-backed API server locally (requires Node-RED reachable at `NODE_RED_URL`). |
@@ -114,6 +117,7 @@ The provider shape is informed by Archon’s [`IAgentProvider` architecture](htt
 - `examples/server-express` — Express transport, default backend, and simulated demo backend.
 - `examples/server-opencode` — small in-memory HTTP backend using the real OpenCode CLI.
 - `examples/server-node-red` — Dockerized fixed workflow backed by private Node-RED HTTP execution.
+- `examples/server-node-red-agents` — Dockerized fixed two-agent flow, internal checkpoint and addressable chats.
 - `examples/client` — typed client, usage sample, and demo runner.
 - `scripts` — OpenAPI/catalog/parity generation and validation.
 - `docs` — API design, event semantics, research, and route accounting.
