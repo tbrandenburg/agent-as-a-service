@@ -83,6 +83,11 @@ try {
   const chatRunId = sent.body.run.id;
   const immediate = await api.runs.getRun({ params: { runId: chatRunId } });
   requireStatus(immediate.status, 200, "getRun immediately after 202");
+  if (
+    immediate.status !== 200 ||
+    immediate.body.conversations?.[0]?.conversationId !== conversation.body.id
+  )
+    throw new Error("Chat run did not expose its public conversation");
   line("Accepted message", `${sent.body.message.id} · HTTP 202`);
   line("GET /runs/{runId} immediately", `HTTP 200 · ${chatRunId}`);
 
@@ -180,8 +185,25 @@ try {
   requireStatus(started.status, 202, "startRun");
   if (started.status !== 202) throw new Error("Missing workflow run");
   const reviewRunId = started.body.run.id;
+  const review = await api.runs.getRun({ params: { runId: reviewRunId } });
+  requireStatus(review.status, 200, "getRun for workflow conversation links");
+  if (
+    review.status !== 200 ||
+    review.body.conversations?.[0]?.conversationId !== conversation.body.id
+  )
+    throw new Error("Workflow run did not expose its public conversation");
+  const linked = await api.conversations.getConversation({
+    params: { conversationId: review.body.conversations[0].conversationId },
+  });
+  requireStatus(linked.status, 200, "getConversation for run link");
+  const linkedMessages = await api.conversations.listMessages({
+    params: { conversationId: review.body.conversations[0].conversationId },
+    query: { limit: 25 },
+  });
+  requireStatus(linkedMessages.status, 200, "listMessages for run link");
   line("Selected workflow", `${workflow.name} · ${workflow.id}`);
   line("Run accepted", `${reviewRunId} · HTTP 202`);
+  line("Public conversation link", review.body.conversations[0].conversationId);
 
   title(7, "Watch the run pause for human approval");
   for (let attempt = 0; attempt < 60; attempt++) {

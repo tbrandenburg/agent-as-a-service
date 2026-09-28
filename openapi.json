@@ -8241,6 +8241,25 @@
                           "status"
                         ]
                       }
+                    },
+                    "conversations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "conversationId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "nodeId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "conversationId"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -8956,6 +8975,25 @@
                           "runId",
                           "prompt",
                           "status"
+                        ]
+                      }
+                    },
+                    "conversations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "conversationId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "nodeId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "conversationId"
                         ]
                       }
                     }

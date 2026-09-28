@@ -116,9 +116,9 @@ describe("in-memory demo lifecycle", () => {
       );
       expect(sent.statusCode).toBe(202);
       const chatRunId = sent.json().run.id as string;
-      expect(
-        (await request("GET", `/api/v1/runs/${chatRunId}`)).statusCode,
-      ).toBe(200);
+      const chatDetail = await request("GET", `/api/v1/runs/${chatRunId}`);
+      expect(chatDetail.statusCode).toBe(200);
+      expect(chatDetail.json().conversations).toEqual([{ conversationId }]);
       const replay = await request(
         "POST",
         url,
@@ -150,9 +150,18 @@ describe("in-memory demo lifecycle", () => {
       );
       expect(workflow.statusCode).toBe(202);
       const runId = workflow.json().run.id as string;
-      expect((await request("GET", `/api/v1/runs/${runId}`)).statusCode).toBe(
-        200,
-      );
+      expect(workflow.json().conversations).toEqual([{ conversationId }]);
+      const detail = await request("GET", `/api/v1/runs/${runId}`);
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json().conversations).toEqual([{ conversationId }]);
+      const linked = detail.json().conversations[0].conversationId as string;
+      expect(
+        (await request("GET", `/api/v1/conversations/${linked}`)).json().id,
+      ).toBe(conversationId);
+      expect(
+        (await request("GET", `/api/v1/conversations/${linked}/messages`))
+          .statusCode,
+      ).toBe(200);
       let interactionId = "";
       for (let attempt = 0; attempt < 40; attempt++) {
         const pending = await request(

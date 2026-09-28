@@ -160,6 +160,80 @@ describe("REST specification", () => {
       }).success,
     ).toBe(true);
   });
+  it("links public conversations to a run without requiring a conversation", () => {
+    const base = {
+      id: "run-1",
+      status: "running",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const legacy = { run: { ...base, conversationId: "primary" } };
+    const withoutConversations = { run: base };
+    const empty = { run: base, conversations: [] };
+    const generated = {
+      run: base,
+      conversations: [{ conversationId: "generated", nodeId: "review" }],
+    };
+    const multiple = {
+      run: { ...base, conversationId: "primary" },
+      conversations: [
+        { conversationId: "primary" },
+        { conversationId: "generated", nodeId: "review" },
+      ],
+    };
+
+    for (const response of [
+      legacy,
+      withoutConversations,
+      empty,
+      generated,
+      multiple,
+    ]) {
+      expect(runDetail.safeParse(response).success).toBe(true);
+      expect(
+        contract.runs.getRun.responses[200].safeParse(response).success,
+      ).toBe(true);
+      expect(
+        contract.runs.startRun.responses[202].safeParse(response).success,
+      ).toBe(true);
+    }
+    expect(runDetail.parse(generated).conversations).toEqual(
+      generated.conversations,
+    );
+    expect(runDetail.parse(multiple).conversations).toEqual(
+      multiple.conversations,
+    );
+    expect(runDetail.safeParse({ ...empty, run: legacy.run }).success).toBe(
+      false,
+    );
+    expect(
+      runDetail.safeParse({
+        ...multiple,
+        conversations: [{ conversationId: "generated", nodeId: "review" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      runDetail.safeParse({
+        ...multiple,
+        conversations: [
+          { conversationId: "primary" },
+          { conversationId: "primary" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      runDetail.safeParse({
+        run: base,
+        conversations: [{ conversationId: "" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      runDetail.safeParse({
+        run: base,
+        conversations: [{ conversationId: "generated", nodeId: "" }],
+      }).success,
+    ).toBe(false);
+  });
   it("provides a canonical outcome for completed and failed runs", () => {
     const id = "00000000-0000-4000-8000-000000000001";
     const base = {

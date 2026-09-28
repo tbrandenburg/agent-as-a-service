@@ -126,11 +126,38 @@ export const interaction = z.object({
   comment: z.string().nullish(),
   artifactIds: z.array(id).optional(),
 });
-export const runDetail = z.object({
-  run,
-  executions: z.array(execution).optional(),
-  interactions: z.array(interaction).optional(),
+export const runConversation = z.object({
+  conversationId: id,
+  nodeId: id.optional(),
 });
+export const runDetail = z
+  .object({
+    run,
+    executions: z.array(execution).optional(),
+    interactions: z.array(interaction).optional(),
+    conversations: z.array(runConversation).optional(),
+  })
+  .superRefine(({ run, conversations }, ctx) => {
+    if (!conversations) return;
+    const ids = new Set<string>();
+    for (const [index, link] of conversations.entries()) {
+      if (ids.has(link.conversationId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["conversations", index, "conversationId"],
+          message: "Conversation IDs must be unique",
+        });
+      }
+      ids.add(link.conversationId);
+    }
+    if (run.conversationId && !ids.has(run.conversationId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["conversations"],
+        message: "Conversations must include run.conversationId",
+      });
+    }
+  });
 export const event = z.object({
   id,
   runId: id,
