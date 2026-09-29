@@ -8,42 +8,48 @@ type Conversation = z.infer<typeof schemas.conversation>;
 type Message = z.infer<typeof schemas.message>;
 type Run = z.infer<typeof schemas.run>;
 type Detail = z.infer<typeof schemas.runDetail>;
-type Sent = z.infer<typeof schemas.sentMessage>;
 type Event = z.infer<typeof schemas.event>;
-type Agent = "writer" | "reviewer";
-type Result = { reply: string; sessionID: string; resumed?: boolean };
-type Checkpoint = Result & {
-  runId: string;
+type ConversationEvent = z.infer<typeof schemas.conversationEvent>;
+type Observation = {
+  version: 1;
+  type:
+    | "node.deployed"
+    | "node.closed"
+    | "execution.started"
+    | "execution.terminal";
+  eventId: string;
+  timestamp: string;
+  nodeId: string;
+  deploymentId: string;
+  agent: string;
+  agentName: string;
+  executionId?: string;
+  agentObservation?: { runId: string };
+  input?: { invocation: string; prompt?: string; name?: string; args?: string };
+  status?: "completed" | "failed" | "timeout";
+  output?: { payload?: unknown; errorMessage?: string };
+};
+type Execution = {
   conversationId: string;
-  prompt: string;
+  nodeId: string;
+  deploymentId: string;
+  agent: string;
+  input: string;
+  terminal?: string;
 };
-type Job = {
-  run: Run;
-  text: string;
-  writer?: string;
-  reviewer?: string;
-  agent?: Agent;
-  checkpoint?: Checkpoint;
+type Job = { run: Run; executions: Map<string, Execution>; failed: boolean };
+type Result = {
+  status: number;
+  body: { acknowledged?: boolean; conversationId?: string; error?: string };
 };
-type PrivateRequest = {
+export type Executor = (payload: {
   runId: string;
   text: string;
-  writerId?: string;
-  reviewerId?: string;
-  conversationId?: string;
-  writerSession?: string;
-  reviewerSession?: string;
-  sessionID?: string;
-};
-type PrivateResponse = Result & { runId: string; conversationId: string };
-export type Executor = (
-  path: string,
-  payload: PrivateRequest,
-) => Promise<PrivateResponse>;
+}) => Promise<void>;
 
 const workflow: z.infer<typeof schemas.definition> = {
   id: "node-red-demo",
-  name: "Writer → reviewer",
+  name: "Parallel agents → summary",
   engine: "node-red",
   specificationVersion: "5.x",
   specification: { endpoint: "/workflow/agents" },
@@ -55,13 +61,10 @@ const missing = (name: string) => ({
   status: 404 as const,
   body: { error: { code: "not_found", message: `${name} was not found` } },
 });
-const problem = (status: 400 | 409, code: string, message: string) => ({
-  status,
-  body: { error: { code, message } },
+const invalid = (message: string) => ({
+  status: 400 as const,
+  body: { error: { code: "invalid_input", message } },
 });
-const invalid = (message: string) => problem(400, "invalid_input", message);
-const agent = (value: unknown): value is Agent =>
-  value === "writer" || value === "reviewer";
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown): value is string =>
@@ -74,42 +77,57 @@ const canonical = (value: unknown): string =>
         )
       : item,
   );
+const reject = (error: string, status = 409): Result => ({
+  status,
+  body: { error },
+});
 
 export const httpExecutor =
   (url: string): Executor =>
-  async (path, payload) => {
-    const response = await fetch(`${url}${path}`, {
+  async (payload) => {
+    const response = await fetch(`${url}/workflow/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(360_000),
+      signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) throw new Error("Private flow failed");
-    return (await response.json()) as PrivateResponse;
+    if (response.status !== 202)
+      throw new Error("Private dispatch was not accepted");
   };
 
 export class AgentsBackend {
+  readonly inventory = new Map<
+    string,
+    { deploymentId: string; agent: string; agentName: string }
+  >();
+  private readonly deployments = new Map<string, Set<string>>();
+  private readonly closedDeployments = new Set<string>();
   readonly conversations = new Map<string, Conversation>();
   readonly messages = new Map<string, Message[]>();
+  readonly conversationEvents = new Map<string, ConversationEvent[]>();
   readonly runs = new Map<string, Detail>();
   readonly events = new Map<string, Event[]>();
-  private readonly sessions = new Map<string, string>();
-  private readonly busy = new Set<string>();
-  private readonly blocked = new Set<string>();
   private readonly jobs = new Map<string, Job>();
+  private readonly notices = new Map<
+    string,
+    { body: string; result: Result }
+  >();
+  private readonly phases = new Map<string, { body: string; result: Result }>();
+  private readonly executionOwners = new Map<string, string>();
+  private readonly finals = new Map<string, { body: string; result: Result }>();
   private readonly keys = new Map<
     string,
-    { body: string; response: Detail | Sent; expires: number }
+    { body: string; response: Detail; expires: number }
   >();
 
-  constructor(private readonly executePrivate: Executor) {}
+  constructor(private readonly dispatch: Executor) {}
 
   private page<T>(items: T[], cursor: string | undefined, limit: number) {
     const offset = cursor === undefined ? 0 : Number(cursor);
     if (
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
-      (String(offset) !== cursor && cursor !== undefined)
+      (cursor !== undefined && String(offset) !== cursor)
     )
       return null;
     return {
@@ -118,242 +136,310 @@ export class AgentsBackend {
     };
   }
 
-  private create(
-    agentId: Agent,
-    title = `${agentId} conversation`,
-  ): Conversation {
-    const conversation: Conversation = {
-      id: randomUUID(),
-      agentId,
-      title,
-      createdAt: new Date().toISOString(),
-    };
-    this.conversations.set(conversation.id, conversation);
-    this.messages.set(conversation.id, []);
-    return conversation;
-  }
-
-  private add(
-    id: string,
-    role: Message["role"],
-    content: string,
-    runId: string,
+  private event(
+    run: Run,
+    type: string,
+    data: Record<string, unknown>,
+    executionId?: string,
   ) {
-    const message: Message & { runId: string } = {
-      id: randomUUID(),
-      conversationId: id,
-      role,
-      content,
-      runId,
-      createdAt: new Date().toISOString(),
-    };
-    this.messages.get(id)!.push(message);
-    return message;
-  }
-
-  private update(run: Run, status: Run["status"], patch: Partial<Run> = {}) {
-    Object.assign(run, patch, { status, updatedAt: new Date().toISOString() });
     const events = this.events.get(run.id)!;
     events.push({
       id: randomUUID(),
       runId: run.id,
       sequence: events.length + 1,
-      type: "run.updated",
-      data: { status },
+      type,
+      data,
+      executionId,
       createdAt: new Date().toISOString(),
     });
   }
 
-  private accept(
-    target: Run["target"],
-    input: Run["input"],
-    links: Detail["conversations"],
-    conversationId?: string,
+  private update(run: Run, status: Run["status"], patch: Partial<Run> = {}) {
+    Object.assign(run, patch, { status, updatedAt: new Date().toISOString() });
+    this.event(run, "run.updated", { status });
+  }
+
+  private conversationEvent(
+    id: string,
+    run: Run,
+    type: string,
+    data: Record<string, unknown>,
   ) {
-    const now = new Date().toISOString();
-    const run: Run = {
+    const events = this.conversationEvents.get(id)!;
+    events.push({
       id: randomUUID(),
-      target,
-      input,
-      conversationId,
-      status: "queued",
-      createdAt: now,
-      updatedAt: now,
-      ...(target?.kind === "workflow" ? { workflowVersion: 1 } : {}),
+      conversationId: id,
+      runId: run.id,
+      sequence: events.length + 1,
+      type,
+      data,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  private add(id: string, role: Message["role"], content: string, run: Run) {
+    const message: Message = {
+      id: randomUUID(),
+      conversationId: id,
+      role,
+      content,
+      runId: run.id,
+      createdAt: new Date().toISOString(),
     };
-    const detail: Detail = { run, conversations: links };
-    this.runs.set(run.id, detail);
-    this.events.set(run.id, []);
-    this.update(run, "queued");
-    return detail;
+    this.messages.get(id)!.push(message);
+    this.conversationEvent(id, run, "message.created", { message });
   }
 
-  private replay<T extends Detail | Sent>(
-    path: string,
-    key: string | undefined,
-    body: unknown,
-  ): { status: 202; body: T } | ReturnType<typeof problem> | undefined {
-    if (!key) return undefined;
-    const prior = this.keys.get(`POST\0${path}\0${key}`);
-    if (!prior || prior.expires <= Date.now()) return undefined;
-    return prior.body === canonical(body)
-      ? { status: 202 as const, body: structuredClone(prior.response) as T }
-      : problem(
-          409,
-          "idempotency_conflict",
-          "Key already used for another body",
+  /** Private callback only; no observation endpoint is registered on the public API. */
+  observe(value: unknown): Result {
+    if (
+      !record(value) ||
+      value.version !== 1 ||
+      !text(value.eventId) ||
+      !text(value.nodeId) ||
+      !text(value.deploymentId) ||
+      !text(value.agent) ||
+      typeof value.agentName !== "string" ||
+      !text(value.timestamp) ||
+      ![
+        "node.deployed",
+        "node.closed",
+        "execution.started",
+        "execution.terminal",
+      ].includes(String(value.type))
+    )
+      return reject("Invalid observation", 400);
+    const observation = value as Observation;
+    const body = canonical(value);
+    const prior = this.notices.get(observation.eventId);
+    if (prior)
+      return prior.body === body
+        ? prior.result
+        : reject("Conflicting event ID");
+    if (
+      observation.type === "node.deployed" ||
+      observation.type === "node.closed"
+    ) {
+      const generations =
+        this.deployments.get(observation.nodeId) ?? new Set<string>();
+      if (
+        observation.type === "node.deployed" &&
+        !generations.has(observation.deploymentId)
+      ) {
+        generations.add(observation.deploymentId);
+        this.deployments.set(observation.nodeId, generations);
+        this.inventory.set(observation.nodeId, {
+          deploymentId: observation.deploymentId,
+          agent: observation.agent,
+          agentName: observation.agentName,
+        });
+      }
+      if (
+        observation.type === "node.closed" &&
+        this.inventory.get(observation.nodeId)?.deploymentId ===
+          observation.deploymentId
+      )
+        this.inventory.delete(observation.nodeId);
+      if (observation.type === "node.closed")
+        this.closedDeployments.add(
+          `${observation.nodeId}\0${observation.deploymentId}`,
         );
-  }
-
-  private remember(
-    path: string,
-    key: string | undefined,
-    body: unknown,
-    response: Detail | Sent,
-  ) {
-    if (key)
-      this.keys.set(`POST\0${path}\0${key}`, {
-        body: canonical(body),
-        response: structuredClone(response),
-        expires: Date.now() + 86_400_000,
+      const result = { status: 200, body: { acknowledged: true } };
+      this.notices.set(observation.eventId, { body, result });
+      return result;
+    }
+    if (
+      !text(observation.executionId) ||
+      !record(observation.agentObservation) ||
+      !text(observation.agentObservation.runId) ||
+      !record(observation.input) ||
+      !text(observation.input.invocation)
+    )
+      return reject("Invalid execution observation", 400);
+    const runId = observation.agentObservation.runId;
+    const job = this.jobs.get(runId);
+    const phase = `${runId}\0${observation.deploymentId}\0${observation.executionId}\0${observation.type}`;
+    const existing = this.phases.get(phase);
+    if (existing)
+      return existing.body === body
+        ? existing.result
+        : reject("Conflicting execution phase");
+    if (!job || job.run.status !== "running")
+      return reject("Run is not active");
+    const owner = this.executionOwners.get(observation.executionId);
+    if (owner && owner !== runId)
+      return reject("Execution belongs to another run");
+    const execution = job.executions.get(observation.executionId);
+    if (observation.type === "execution.started") {
+      if (
+        execution ||
+        !text(observation.input.prompt ?? observation.input.args)
+      )
+        return reject("Invalid or duplicate execution start");
+      // A start repairs a lost best-effort deployment notice.
+      const current = this.inventory.get(observation.nodeId);
+      if (
+        (current && current.deploymentId !== observation.deploymentId) ||
+        this.closedDeployments.has(
+          `${observation.nodeId}\0${observation.deploymentId}`,
+        )
+      )
+        return reject("Stale deployment");
+      this.inventory.set(observation.nodeId, {
+        deploymentId: observation.deploymentId,
+        agent: observation.agent,
+        agentName: observation.agentName,
       });
-  }
-
-  private ownership(id: string, owner: Agent) {
-    const conversation = this.conversations.get(id);
-    return conversation?.agentId === owner;
-  }
-
-  private checkBusy(ids: string[]) {
-    return ids.some((id) => this.busy.has(id) || this.blocked.has(id));
-  }
-
-  private validResult(
-    value: unknown,
-    requested: string | undefined,
-  ): value is Result & Record<string, unknown> {
-    return (
-      record(value) &&
-      text(value.reply) &&
-      text(value.sessionID) &&
-      (!requested || value.resumed === true)
+      const generations =
+        this.deployments.get(observation.nodeId) ?? new Set<string>();
+      generations.add(observation.deploymentId);
+      this.deployments.set(observation.nodeId, generations);
+      const id = randomUUID();
+      const conversation: Conversation = {
+        id,
+        agentId: observation.nodeId,
+        title: observation.agentName || `${observation.nodeId} conversation`,
+        createdAt: new Date().toISOString(),
+      };
+      this.conversations.set(id, conversation);
+      this.messages.set(id, []);
+      this.conversationEvents.set(id, []);
+      this.add(
+        id,
+        "user",
+        (observation.input.prompt ?? observation.input.args)!,
+        job.run,
+      );
+      job.executions.set(observation.executionId, {
+        conversationId: id,
+        nodeId: observation.nodeId,
+        deploymentId: observation.deploymentId,
+        agent: observation.agent,
+        input: canonical(observation.input),
+      });
+      this.executionOwners.set(observation.executionId, runId);
+      this.runs.get(runId)!.conversations!.push({
+        conversationId: id,
+        nodeId: observation.nodeId,
+      });
+      this.event(
+        job.run,
+        "execution.started",
+        { nodeId: observation.nodeId, conversationId: id },
+        observation.executionId,
+      );
+      this.conversationEvent(id, job.run, "run.updated", {
+        run: structuredClone(job.run),
+      });
+      const result = {
+        status: 200,
+        body: { acknowledged: true, conversationId: id },
+      };
+      this.phases.set(phase, { body, result });
+      this.notices.set(observation.eventId, { body, result });
+      return result;
+    }
+    if (
+      !execution ||
+      execution.nodeId !== observation.nodeId ||
+      execution.deploymentId !== observation.deploymentId ||
+      execution.agent !== observation.agent ||
+      execution.input !== canonical(observation.input) ||
+      execution.terminal ||
+      !["completed", "failed", "timeout"].includes(String(observation.status))
+    )
+      return reject("Terminal without matching start");
+    if (
+      observation.status === "completed" &&
+      (!record(observation.output) || !text(observation.output.payload))
+    )
+      return reject("Invalid successful output");
+    execution.terminal = observation.status;
+    if (observation.status === "completed")
+      this.add(
+        execution.conversationId,
+        "assistant",
+        observation.output!.payload as string,
+        job.run,
+      );
+    else job.failed = true;
+    this.event(
+      job.run,
+      "execution.terminal",
+      { status: observation.status, nodeId: observation.nodeId },
+      observation.executionId,
     );
+    this.conversationEvent(execution.conversationId, job.run, "run.updated", {
+      run: structuredClone(job.run),
+      executionStatus: observation.status,
+    });
+    const result = {
+      status: 200,
+      body: { acknowledged: true, conversationId: execution.conversationId },
+    };
+    this.phases.set(phase, { body, result });
+    this.notices.set(observation.eventId, { body, result });
+    return result;
   }
 
-  /** Only the private Compose listener calls this; never register on the public app. */
-  checkpoint(value: unknown): {
-    status: number;
-    body: { acknowledged?: boolean; error?: string };
-  } {
+  /** Explicit workflow boundary, not an inference from the last observed agent. */
+  finalize(value: unknown): Result {
     if (
       !record(value) ||
       !text(value.runId) ||
-      !text(value.conversationId) ||
-      !text(value.prompt)
+      !text(value.eventId) ||
+      !["completed", "failed"].includes(String(value.status)) ||
+      (value.status === "completed" && !text(value.output))
     )
-      return { status: 400, body: { error: "Invalid checkpoint" } };
+      return reject("Invalid finalization", 400);
+    const body = canonical(value);
+    const prior = this.finals.get(value.runId);
+    if (prior)
+      return prior.body === body
+        ? prior.result
+        : reject("Conflicting finalization");
     const job = this.jobs.get(value.runId);
+    if (!job || job.run.status !== "running")
+      return reject("Run is not active");
     if (
-      !job ||
-      !job.writer ||
-      !job.reviewer ||
-      job.run.status !== "running" ||
-      value.conversationId !== job.writer
+      value.status === "completed" &&
+      (job.failed ||
+        job.executions.size === 0 ||
+        [...job.executions.values()].some(
+          (execution) => execution.terminal !== "completed",
+        ))
     )
-      return { status: 409, body: { error: "Checkpoint rejected" } };
-    if (job.checkpoint)
-      return canonical({
-        ...job.checkpoint,
-        resumed: job.checkpoint.resumed === true,
-      }) ===
-        canonical({
-          runId: value.runId,
-          conversationId: value.conversationId,
-          prompt: value.prompt,
-          reply: value.reply,
-          sessionID: value.sessionID,
-          resumed: value.resumed === true,
-        })
-        ? { status: 200, body: { acknowledged: true } }
-        : { status: 409, body: { error: "Conflicting checkpoint" } };
-    if (!this.validResult(value, this.sessions.get(job.writer)))
-      return { status: 409, body: { error: "Checkpoint rejected" } };
-    const checkpoint: Checkpoint = {
-      runId: value.runId,
-      conversationId: value.conversationId,
-      prompt: value.prompt,
-      reply: value.reply,
-      sessionID: value.sessionID,
-      resumed: value.resumed === true,
-    };
-    this.add(job.writer, "assistant", checkpoint.reply, job.run.id);
-    this.sessions.set(job.writer, checkpoint.sessionID);
-    this.add(job.reviewer, "user", checkpoint.prompt, job.run.id);
-    job.checkpoint = checkpoint;
-    return { status: 200, body: { acknowledged: true } };
+      return reject("Unacknowledged execution");
+    if (value.status === "completed")
+      this.update(job.run, "completed", { output: value.output as string });
+    else
+      this.update(job.run, "failed", {
+        error: {
+          code: "workflow_failed",
+          message: "The workflow could not complete",
+        },
+      });
+    for (const execution of job.executions.values())
+      this.conversationEvent(execution.conversationId, job.run, "run.updated", {
+        run: structuredClone(job.run),
+      });
+    const result = { status: 200, body: { acknowledged: true } };
+    this.finals.set(value.runId, { body, result });
+    return result;
   }
 
-  private async run(job: Job) {
-    const { run, writer, reviewer, agent, text: prompt } = job;
-    const ids = [writer, reviewer].filter((id): id is string => !!id);
-    this.update(run, "running");
-    let ambiguous = false;
+  private async send(job: Job, text: string) {
     try {
-      const id = agent === "writer" ? writer! : reviewer!;
-      const requested = agent ? this.sessions.get(id) : undefined;
-      const result = await this.executePrivate(
-        agent ? `/agent/${agent}` : "/workflow/agents",
-        {
-          runId: run.id,
-          text: prompt,
-          ...(agent
-            ? { conversationId: id, sessionID: requested }
-            : {
-                writerId: writer,
-                reviewerId: reviewer,
-                writerSession: this.sessions.get(writer!),
-                reviewerSession: this.sessions.get(reviewer!),
-              }),
-        },
-      );
-      if (
-        result.runId !== run.id ||
-        result.conversationId !== (agent ? id : reviewer) ||
-        !this.validResult(
-          result,
-          agent ? requested : this.sessions.get(reviewer!),
-        ) ||
-        (!agent && !job.checkpoint)
-      ) {
-        ambiguous = true;
-        throw new Error("Invalid private result");
-      }
-      this.add(id, "assistant", result.reply, run.id);
-      this.sessions.set(id, result.sessionID);
-      this.update(run, "completed", {
-        output: agent
-          ? result.reply
-          : `Writer: ${job.checkpoint!.reply}\nReviewer: ${result.reply}`,
-      });
-    } catch (error) {
-      ambiguous ||=
-        error instanceof Error &&
-        (error.name === "TimeoutError" ||
-          error.name === "AbortError" ||
-          error instanceof TypeError);
-      this.update(run, "failed", {
-        error: {
-          code: agent ? "agent_failed" : "workflow_failed",
-          message: "The run could not complete",
-        },
-      });
-    } finally {
-      if (ambiguous)
-        this.blocked.add(
-          agent ? ids[0]! : job.checkpoint ? reviewer! : writer!,
-        );
-      ids.forEach((id) => this.busy.delete(id));
-      this.jobs.delete(run.id);
+      await this.dispatch({ runId: job.run.id, text });
+      // A start can arrive before the dispatch response.
+    } catch {
+      if (job.run.status === "running")
+        this.update(job.run, "failed", {
+          error: {
+            code: "dispatch_failed",
+            message: "The workflow could not be dispatched",
+          },
+        });
     }
   }
 
@@ -390,124 +476,57 @@ export class AgentsBackend {
       runs: {
         ...notImplementedRoutes.runs,
         startRun: async ({ body, headers }) => {
-          const prior = this.replay<Detail>(
-            "/api/v1/runs",
-            headers["idempotency-key"],
-            body,
-          );
-          if (prior) return prior;
-          if (body.projectId || body.engineOptions)
-            return invalid("Projects and engine options are not supported");
+          const key = headers["idempotency-key"];
+          const previous = key && this.keys.get(key);
+          if (previous && previous.expires > Date.now())
+            return previous.body === canonical(body)
+              ? { status: 202, body: structuredClone(previous.response) }
+              : {
+                  status: 409,
+                  body: {
+                    error: {
+                      code: "idempotency_conflict",
+                      message: "Key already used for another body",
+                    },
+                  },
+                };
           if (
-            body.target?.kind === "workflow" &&
-            body.target.workflowId !== workflow.id
-          )
-            return missing("Workflow");
-          if (body.target?.kind === "agent" && !agent(body.target.agentId))
-            return invalid("Unknown agent");
-          if (!body.target) return invalid("A target is required");
-          const isWorkflow = body.target.kind === "workflow";
-          const agentId =
-            body.target.kind === "agent"
-              ? (body.target.agentId as Agent)
-              : undefined;
-          if (
+            body.projectId ||
+            body.engineOptions ||
+            body.conversationId ||
+            body.target?.kind !== "workflow" ||
+            body.target.workflowId !== workflow.id ||
             !record(body.input) ||
             !text(body.input.text) ||
-            Object.keys(body.input).some(
-              (key) =>
-                !["text", ...(isWorkflow ? ["conversationIds"] : [])].includes(
-                  key,
-                ),
-            )
+            Object.keys(body.input).some((field) => field !== "text")
           )
-            return invalid("Invalid text input");
-          if (isWorkflow && body.conversationId)
-            return invalid("Workflow conversationId is not supported");
-          const selected = isWorkflow ? body.input.conversationIds : undefined;
-          if (
-            selected !== undefined &&
-            (!record(selected) ||
-              Object.keys(selected).some((key) => !agent(key)) ||
-              Object.values(selected).some((id) => !text(id)))
-          )
-            return invalid("Invalid conversationIds");
-          const chosen = selected as Record<string, string> | undefined;
-          const writer = isWorkflow
-            ? chosen?.writer
-            : agentId === "writer"
-              ? body.conversationId
-              : undefined;
-          const reviewer = isWorkflow
-            ? chosen?.reviewer
-            : agentId === "reviewer"
-              ? body.conversationId
-              : undefined;
-          if (
-            (writer && !this.ownership(writer, "writer")) ||
-            (reviewer && !this.ownership(reviewer, "reviewer")) ||
-            (writer && reviewer && writer === reviewer)
-          )
-            return invalid(
-              "Conversation does not belong to the selected agent",
-            );
-          if (
-            this.checkBusy(
-              [writer, reviewer].filter((id): id is string => !!id),
-            )
-          )
-            return problem(
-              409,
-              "conversation_busy",
-              "Conversation is unavailable for execution",
-            );
-          const actualWriter =
-            isWorkflow || agentId === "writer"
-              ? (writer ?? this.create("writer").id)
-              : undefined;
-          const actualReviewer =
-            isWorkflow || agentId === "reviewer"
-              ? (reviewer ?? this.create("reviewer").id)
-              : undefined;
-          const ids = [actualWriter, actualReviewer].filter(
-            (id): id is string => !!id,
-          );
-          ids.forEach((id) => this.busy.add(id));
-          const links = ids.map((id) => ({
-            conversationId: id,
-            nodeId:
-              this.conversations.get(id)!.agentId === "writer"
-                ? "writer-node"
-                : "reviewer-node",
-          }));
-          const detail = this.accept(
-            body.target,
-            body.input,
-            links,
-            isWorkflow ? undefined : ids[0],
-          );
-          this.add(
-            actualWriter ?? actualReviewer!,
-            "user",
-            body.input.text,
-            detail.run.id,
-          );
-          const job: Job = {
-            run: detail.run,
-            text: body.input.text,
-            writer: actualWriter,
-            reviewer: actualReviewer,
-            ...(!isWorkflow ? { agent: agentId } : {}),
+            return invalid("Only workflow text input is supported");
+          const prompt = (body.input as { text: string }).text;
+          const now = new Date().toISOString();
+          const run: Run = {
+            id: randomUUID(),
+            target: body.target,
+            input: body.input,
+            workflowVersion: 1,
+            status: "queued",
+            createdAt: now,
+            updatedAt: now,
           };
-          this.jobs.set(detail.run.id, job);
+          const detail: Detail = { run, conversations: [] };
+          this.runs.set(run.id, detail);
+          this.events.set(run.id, []);
+          this.update(run, "queued");
+          const job: Job = { run, executions: new Map(), failed: false };
+          this.jobs.set(run.id, job);
           const response = structuredClone(detail);
-          this.remember(
-            "/api/v1/runs",
-            headers["idempotency-key"],
-            body,
-            response,
-          );
-          setImmediate(() => void this.run(job));
+          if (key)
+            this.keys.set(key, {
+              body: canonical(body),
+              response,
+              expires: Date.now() + 86_400_000,
+            });
+          this.update(run, "running");
+          setImmediate(() => void this.send(job, prompt));
           return { status: 202, body: response };
         },
         getRun: async ({ params }) => {
@@ -548,12 +567,6 @@ export class AgentsBackend {
       },
       conversations: {
         ...notImplementedRoutes.conversations,
-        createConversation: async ({ body }) => {
-          if (!agent(body.agentId))
-            return invalid("Explicit writer or reviewer agentId required");
-          if (body.projectId) return invalid("Projects are not supported");
-          return { status: 201, body: this.create(body.agentId, body.title) };
-        },
         getConversation: async ({ params }) => {
           const conversation = this.conversations.get(params.conversationId);
           return conversation
@@ -561,12 +574,15 @@ export class AgentsBackend {
             : missing("Conversation");
         },
         listConversations: async ({ query }) => {
-          const items = [...this.conversations.values()].filter(
-            (item) =>
-              (!query.agentId || item.agentId === query.agentId) &&
-              (!query.projectId || item.projectId === query.projectId),
+          const page = this.page(
+            [...this.conversations.values()].filter(
+              (item) =>
+                (!query.agentId || item.agentId === query.agentId) &&
+                (!query.projectId || item.projectId === query.projectId),
+            ),
+            query.cursor,
+            query.limit,
           );
-          const page = this.page(items, query.cursor, query.limit);
           return page ? { status: 200, body: page } : invalid("Invalid cursor");
         },
         listMessages: async ({ params, query }) => {
@@ -574,53 +590,6 @@ export class AgentsBackend {
           if (!items) return missing("Conversation");
           const page = this.page(items, query.cursor, query.limit);
           return page ? { status: 200, body: page } : invalid("Invalid cursor");
-        },
-        sendMessage: async ({ params, body, headers }) => {
-          const path = `/api/v1/conversations/${params.conversationId}/messages`;
-          const prior = this.replay<Sent>(
-            path,
-            headers["idempotency-key"],
-            body,
-          );
-          if (prior) return prior;
-          const conversation = this.conversations.get(params.conversationId);
-          if (!conversation) return missing("Conversation");
-          if (!text(body.content))
-            return problem(
-              400,
-              "unsupported_content",
-              "Only nonblank plain text is supported",
-            );
-          if (this.checkBusy([conversation.id]))
-            return problem(
-              409,
-              "conversation_busy",
-              "Conversation is unavailable for execution",
-            );
-          const id = conversation.id;
-          const owner = conversation.agentId as Agent;
-          this.busy.add(id);
-          const detail = this.accept(
-            { kind: "agent", agentId: owner },
-            body.content,
-            [{ conversationId: id, nodeId: `${owner}-node` }],
-            id,
-          );
-          const message = this.add(id, "user", body.content, detail.run.id);
-          const job: Job = {
-            run: detail.run,
-            text: body.content,
-            agent: owner,
-            ...(owner === "writer" ? { writer: id } : { reviewer: id }),
-          };
-          this.jobs.set(detail.run.id, job);
-          const response = {
-            message: structuredClone(message),
-            run: structuredClone(detail.run),
-          };
-          this.remember(path, headers["idempotency-key"], body, response);
-          setImmediate(() => void this.run(job));
-          return { status: 202, body: response };
         },
       },
     };

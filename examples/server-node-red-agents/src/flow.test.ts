@@ -8,7 +8,7 @@ type FlowNode = {
   type: string;
   func?: string;
   wires: string[][];
-  retryMaxAttempts?: number;
+  concurrency?: number;
 };
 const nodes = JSON.parse(
   readFileSync(
@@ -18,105 +18,68 @@ const nodes = JSON.parse(
 ) as FlowNode[];
 const node = (id: string) => {
   const result = nodes.find((item) => item.id === id);
-  if (!result) throw new Error(`Missing flow node ${id}`);
+  if (!result) throw new Error(`Missing ${id}`);
   return result;
 };
-const invoke = (id: string, message: Record<string, unknown>) => {
-  const func = node(id).func;
-  if (!func) throw new Error(`Missing function ${id}`);
-  return vm.runInNewContext(`(function(msg, env) { ${func} })(msg, env)`, {
-    msg: message,
-    env: { get: () => "internal-token" },
-  }) as Record<string, unknown> | (Record<string, unknown> | null)[];
-};
+const invoke = (id: string, message: Record<string, unknown>) =>
+  vm.runInNewContext(
+    `(function(msg, node, env) { ${node(id).func} })(msg, node, env)`,
+    {
+      msg: message,
+      node: { error: () => {}, warn: () => {} },
+      env: { get: () => "internal-test-token" },
+    },
+  ) as Record<string, unknown> | (Record<string, unknown> | null)[] | null;
 
-describe("deployed Node-RED flow guards", () => {
-  it("wires one workflow input through two fixed nodes and an acknowledged checkpoint", () => {
-    expect(
-      nodes.filter((item) => item.type === "agent").map((item) => item.id),
-    ).toEqual(["writer-agent", "reviewer-agent"]);
-    expect(node("workflow-in").wires[0]).toEqual(["workflow-entry"]);
-    expect(node("workflow-entry").wires[0]).toEqual(["writer-agent"]);
-    expect(node("writer-agent").wires[0]).toEqual(["writer-result"]);
-    expect(node("writer-result").wires[0]).toEqual(["checkpoint-request"]);
-    expect(node("checkpoint-request").wires[0]).toEqual(["checkpoint-ack"]);
-    expect(node("checkpoint-ack").wires[0]).toEqual(["reviewer-agent"]);
-    expect(node("writer-agent").retryMaxAttempts).toBe(1);
-    expect(node("reviewer-agent").retryMaxAttempts).toBe(1);
-    expect(node("writer-in").wires[0]).toEqual(["writer-entry"]);
-    expect(node("reviewer-in").wires[0]).toEqual(["reviewer-entry"]);
-  });
-
-  it("only confirmed writer results reach checkpoint and reviewer uses its own session", () => {
-    const entry = invoke("workflow-entry", {
-      payload: {
-        runId: "r",
-        text: "original",
-        writerId: "w",
-        reviewerId: "v",
-        writerSession: "writer-old",
-        reviewerSession: "reviewer-old",
-        arbitrary: "ignored",
-      },
-    }) as (Record<string, unknown> | null)[];
-    const writer = entry[0]!;
-    expect(writer.sessionID).toBe("writer-old");
-    expect(JSON.stringify(writer)).not.toContain("arbitrary");
-    const failed = invoke("writer-result", {
+describe("deployed flow boundary", () => {
+  it("dispatches before agents and propagates correlation through parallel join and repeated node", () => {
+    expect(node("workflow-entry").wires).toEqual([
+      ["writer-agent"],
+      ["reviewer-agent"],
+      ["response"],
+    ]);
+    expect(node("writer-agent").concurrency).toBeGreaterThan(1);
+    const [writer, reviewer, response] = invoke("workflow-entry", {
+      payload: { runId: "r1", text: "input", arbitrary: "secret" },
+    }) as Record<string, unknown>[];
+    expect(response.statusCode).toBe(202);
+    expect(writer.agentObservation).toEqual({ runId: "r1" });
+    expect(reviewer.agentObservation).toEqual({ runId: "r1" });
+    expect(JSON.stringify(writer)).not.toContain("secret");
+    const [branch] = invoke("branch-result", {
       ...writer,
-      payload: "text",
-      sessionID: "writer-new",
-      agentExecution: { status: "failed", resumed: true },
-    }) as (Record<string, unknown> | null)[];
-    expect(failed[0]).toBeNull();
-    expect(failed[2]?.statusCode).toBe(502);
-    const missingSession = invoke("writer-result", {
-      ...writer,
-      payload: "text",
-      sessionID: undefined,
-      agentExecution: { status: "completed", resumed: true },
-    }) as (Record<string, unknown> | null)[];
-    expect(missingSession[0]).toBeNull();
-    const unconfirmed = invoke("writer-result", {
-      ...writer,
-      payload: "text",
-      sessionID: "writer-new",
-      agentExecution: { status: "completed", resumed: false },
-    }) as (Record<string, unknown> | null)[];
-    expect(unconfirmed[0]).toBeNull();
-    const passed = invoke("writer-result", {
-      ...writer,
-      payload: "writer reply",
-      sessionID: "writer-new",
-      agentExecution: { status: "completed", resumed: true },
-    }) as (Record<string, unknown> | null)[];
-    const checkpoint = passed[0]!;
-    expect(checkpoint.payload).toMatchObject({
-      runId: "r",
-      conversationId: "w",
-      reply: "writer reply",
-      sessionID: "writer-new",
+      payload: "real output",
+      agentExecution: { status: "completed" },
+    }) as Record<string, unknown>[];
+    expect(branch.parts).toMatchObject({ id: "r1", count: 2 });
+    const [summary] = invoke("summary-prompt", {
+      ...branch,
+      payload: ["real output", "test suggestion"],
+    }) as Record<string, unknown>[];
+    expect(node("summary-prompt").wires[0]).toEqual(["writer-agent"]);
+    expect(summary.agentObservation).toEqual({ runId: "r1" });
+    expect(summary.parts).toBeUndefined();
+    expect(summary.topic).toBe("summary");
+    const [final] = invoke("success", {
+      ...summary,
+      payload: "final reply",
+      agentExecution: { status: "completed" },
+    }) as Record<string, unknown>[];
+    expect(final).toMatchObject({
+      payload: { runId: "r1", status: "completed", output: "final reply" },
     });
-    expect(JSON.stringify(checkpoint.payload)).toContain("original");
-    const rejected = invoke("checkpoint-ack", {
-      ...checkpoint,
-      statusCode: 409,
-      payload: { acknowledged: false },
+    const [, summarized] = invoke("branch-result", {
+      ...summary,
+      payload: "final reply",
+      agentExecution: { status: "completed" },
     }) as (Record<string, unknown> | null)[];
-    expect(rejected[0]).toBeNull();
-    const reviewer = invoke("checkpoint-ack", {
-      ...checkpoint,
-      statusCode: 200,
-      payload: { acknowledged: true },
-    }) as (Record<string, unknown> | null)[];
-    expect(reviewer[0]?.sessionID).toBe("reviewer-old");
-    expect(reviewer[0]?.payload).toContain("writer reply");
-    const reviewerFailed = invoke("reviewer-result", {
-      ...reviewer[0],
-      payload: null,
-      sessionID: "reviewer-new",
-      agentExecution: { status: "timeout", resumed: true },
-    }) as Record<string, unknown>;
-    expect(reviewerFailed.statusCode).toBe(502);
+    expect(summarized?.payload).toBe("final reply");
+    expect(invoke("failure", { runId: "r1" })).toMatchObject({
+      payload: { runId: "r1", status: "failed" },
+    });
+    expect(node("agent-catch").wires).toEqual([["failure"]]);
+    expect(
+      (invoke("final-headers", final) as Record<string, unknown>).headers,
+    ).toMatchObject({ authorization: "Bearer internal-test-token" });
   });
 });

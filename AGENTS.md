@@ -43,6 +43,7 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-09-29: Pitfall: Concurrent first-use OpenCode CLI processes raced while initializing local storage, failing fresh parallel workflows. Prevention rule/countermeasure: initialize CLI storage once during image build before allowing parallel agent invocations.
 - 2026-09-27: Pitfall: A one-off real-provider failure was initially indistinguishable from an adapter regression. Prevention: reproduce provider failures with the direct CLI, then rerun the HTTP demo before attributing them to integration code.
 - 2026-09-28: Pitfall: A worktree without local workspace links resolved package imports through the coordinator checkout, hiding type mismatches. Prevention rule/countermeasure: run `npm ci` in each worktree before typechecking or running demos.
 - 2026-09-28: Pitfall: A Docker demo passed Express health before its private Node-RED flow loaded, causing an intermittent first-run failure. Prevention rule/countermeasure: wait for the private execution entry to be ready before starting real workflow E2E checks.

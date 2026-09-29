@@ -17,7 +17,7 @@ help:
 	  'demo-express      Run the simulated end-to-end workflow walkthrough' \
 	  'demo-opencode     Build Docker and run the real published-port walkthrough' \
 	  'demo-node-red     Build Docker and run the real Node-RED walkthrough' \
-	  'demo-node-red-agents  Run the real writer/reviewer Node-RED walkthrough'
+	  'demo-node-red-agents  Run the real lifecycle-observed Node-RED walkthrough'
 
 install:
 	npm ci
@@ -120,7 +120,7 @@ demo-node-red-agents:
 	if [ -n "$$listeners" ]; then printf '%s\n' 'Port 3094 is occupied; refusing to start Compose'; exit 1; fi; \
 	project="aas-node-red-agents-demo-$$$$"; \
 	export API_TOKEN="$${API_TOKEN:-dev-token}"; \
-	export INTERNAL_TOKEN="$${INTERNAL_TOKEN:-internal-checkpoint-demo-token}"; \
+	export INTERNAL_TOKEN="$${INTERNAL_TOKEN:-internal-observer-demo-token}"; \
 	if [ "$$API_TOKEN" = "$$INTERNAL_TOKEN" ]; then printf '%s\n' 'Internal and public tokens must differ'; exit 1; fi; \
 	cleanup() { docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml down --volumes --remove-orphans; }; \
 	trap cleanup EXIT; \
@@ -129,7 +129,7 @@ demo-node-red-agents:
 	docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml up --build -d; \
 	ready=0; \
 	for attempt in $$(seq 1 90); do \
-	  if curl --fail --silent http://127.0.0.1:3094/api/v1/health >/dev/null && docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml exec -T node-red node -e "fetch('http://127.0.0.1:1880/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then ready=1; break; fi; \
+	  if curl --fail --silent http://127.0.0.1:3094/api/v1/health >/dev/null && docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml exec -T node-red node -e "Promise.all([fetch('http://127.0.0.1:1880/ready'),fetch('http://api:3095/observations',{method:'POST'})]).then(([flow,callback]) => process.exit(flow.ok && callback.status === 401 ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then ready=1; break; fi; \
 	  sleep 1; \
 	done; \
 	if [ "$$ready" -ne 1 ]; then docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml logs; exit 1; fi; \
