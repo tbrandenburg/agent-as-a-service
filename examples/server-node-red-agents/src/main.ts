@@ -12,7 +12,7 @@ const backend = new AgentsBackend(
 );
 const internal = express();
 internal.use(express.json({ limit: "1mb" }));
-internal.post("/checkpoint", (request, response) => {
+internal.use((request, response, next) => {
   const supplied = Buffer.from(
     request.headers.authorization?.replace(/^Bearer /, "") ?? "",
   );
@@ -24,7 +24,17 @@ internal.post("/checkpoint", (request, response) => {
     response.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const result = backend.checkpoint(request.body);
+  next();
+});
+internal.post("/observations", (request, response) => {
+  const result = backend.observe(request.body);
+  response.status(result.status).json(result.body);
+});
+internal.get("/inventory", (_request, response) => {
+  response.json(Object.fromEntries(backend.inventory));
+});
+internal.post("/finalize", (request, response) => {
+  const result = backend.finalize(request.body);
   response.status(result.status).json(result.body);
 });
 const privateServer = internal.listen(3095, "0.0.0.0");
