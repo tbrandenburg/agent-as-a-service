@@ -43,6 +43,7 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-09-29: Pitfall: Parallel Compose demos exhausted host storage after many project-scoped image builds, causing misleading readiness failures. Prevention rule/countermeasure: Check disk capacity before concurrent Docker E2E and remove only session-owned test images after teardown.
 - 2026-09-29: Pitfall: Concurrent first-use OpenCode CLI processes raced while initializing local storage, failing fresh parallel workflows. Prevention rule/countermeasure: initialize CLI storage once during image build before allowing parallel agent invocations.
 - 2026-09-27: Pitfall: A one-off real-provider failure was initially indistinguishable from an adapter regression. Prevention: reproduce provider failures with the direct CLI, then rerun the HTTP demo before attributing them to integration code.
 - 2026-09-28: Pitfall: A worktree without local workspace links resolved package imports through the coordinator checkout, hiding type mismatches. Prevention rule/countermeasure: run `npm ci` in each worktree before typechecking or running demos.

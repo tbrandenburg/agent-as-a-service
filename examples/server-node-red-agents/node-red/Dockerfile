@@ -4,11 +4,14 @@ RUN npm install -g opencode-ai@1.18.33 --ignore-scripts=false
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/package.json examples/server-node-red-agents/node-red/package-lock.json /data/
 WORKDIR /data
 RUN npm ci --omit=dev
-COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/flows.json /data/flows.json
-COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/settings.js /data/settings.js
-COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/fixture/opencode /data/fixture/opencode
-RUN chmod +x /data/fixture/opencode
-RUN mkdir -p /data/agent-work && chown -R node-red:node-red /data
+COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/flows.json /seed/flows.json
+COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/settings.js /seed/settings.js
+COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/fixture/opencode /seed/fixture/opencode
+RUN chmod +x /seed/fixture/opencode
+RUN mkdir -p /data/agent-work && chown -R node-red:node-red /data /seed
+RUN rm -f /data/flows.json
 WORKDIR /usr/src/node-red
 USER node-red
 RUN opencode session list --format json > /dev/null
+ENTRYPOINT ["sh", "-c"]
+CMD ["set -e; cp /seed/settings.js /data/settings.js; mkdir -p /data/fixture /data/agent-work; cp /seed/fixture/opencode /data/fixture/opencode; if [ ! -f /data/flows.json ]; then cp /seed/flows.json /data/flows.json; fi; exec /usr/src/node-red/entrypoint.sh"]

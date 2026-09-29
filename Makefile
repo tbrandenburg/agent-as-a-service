@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check security lint format-check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents
+.PHONY: help install generate openapi catalog parity-doc check security lint format-check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
 
 help:
 	@printf '%s\n' \
@@ -17,7 +17,12 @@ help:
 	  'demo-express      Run the simulated end-to-end workflow walkthrough' \
 	  'demo-opencode     Build Docker and run the real published-port walkthrough' \
 	  'demo-node-red     Build Docker and run the real Node-RED walkthrough' \
-	  'demo-node-red-agents  Run the real lifecycle-observed Node-RED walkthrough'
+	  'demo-node-red-agents  Run a disposable lifecycle-observed Node-RED walkthrough' \
+	  'start-node-red-agents    Start named instance (INSTANCE and three distinct tokens required)' \
+	  'status-node-red-agents   Show named instance URL and containers (INSTANCE required)' \
+	  'logs-node-red-agents     Show named instance logs (INSTANCE required)' \
+	  'stop-node-red-agents     Stop named instance, retain volumes (INSTANCE required)' \
+	  'cleanup-node-red-agents  Remove named instance and its volumes (INSTANCE required)'
 
 install:
 	npm ci
@@ -115,22 +120,7 @@ demo-node-red:
 	DEMO_BASE_URL=http://127.0.0.1:3093 npm run demo:node-red
 
 demo-node-red-agents:
-	@set -eu; \
-	listeners="$$(ss -H -ltn '( sport = :3094 )')"; \
-	if [ -n "$$listeners" ]; then printf '%s\n' 'Port 3094 is occupied; refusing to start Compose'; exit 1; fi; \
-	project="aas-node-red-agents-demo-$$$$"; \
-	export API_TOKEN="$${API_TOKEN:-dev-token}"; \
-	export INTERNAL_TOKEN="$${INTERNAL_TOKEN:-internal-observer-demo-token}"; \
-	if [ "$$API_TOKEN" = "$$INTERNAL_TOKEN" ]; then printf '%s\n' 'Internal and public tokens must differ'; exit 1; fi; \
-	cleanup() { docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml down --volumes --remove-orphans; }; \
-	trap cleanup EXIT; \
-	trap 'exit 130' INT; \
-	trap 'exit 143' TERM; \
-	docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml up --build -d; \
-	ready=0; \
-	for attempt in $$(seq 1 90); do \
-	  if curl --fail --silent http://127.0.0.1:3094/api/v1/health >/dev/null && docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml exec -T node-red node -e "Promise.all([fetch('http://127.0.0.1:1880/ready'),fetch('http://api:3095/observations',{method:'POST'})]).then(([flow,callback]) => process.exit(flow.ok && callback.status === 401 ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then ready=1; break; fi; \
-	  sleep 1; \
-	done; \
-	if [ "$$ready" -ne 1 ]; then docker compose -p "$$project" -f examples/server-node-red-agents/compose.yaml logs; exit 1; fi; \
-	DEMO_BASE_URL=http://127.0.0.1:3094 npm run demo:node-red-agents
+	@bash examples/server-node-red-agents/instance.sh demo
+
+start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents:
+	@bash examples/server-node-red-agents/instance.sh $(patsubst %-node-red-agents,%,$@)

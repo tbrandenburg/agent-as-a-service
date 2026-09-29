@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { schemas } from "@agent-as-a-service/contract";
 import type { z } from "zod";
+import type { Admin, Store } from "./admin.js";
+import { verified } from "./admin.js";
+import { entryOf, tabFor, validate } from "./managed.js";
+import type { Definition, Input, Registry } from "./managed.js";
 import { notImplementedRoutes } from "../../server-express/src/index.js";
 import type { ApiImplementation } from "../../server-express/src/index.js";
 
@@ -45,11 +49,12 @@ type Result = {
 export type Executor = (payload: {
   runId: string;
   text: string;
+  path: string;
 }) => Promise<void>;
 
 const workflow: z.infer<typeof schemas.definition> = {
   id: "node-red-demo",
-  name: "Parallel agents → summary",
+  name: "Core",
   engine: "node-red",
   specificationVersion: "5.x",
   specification: { endpoint: "/workflow/agents" },
@@ -64,6 +69,14 @@ const missing = (name: string) => ({
 const invalid = (message: string) => ({
   status: 400 as const,
   body: { error: { code: "invalid_input", message } },
+});
+const errorResponse = (
+  status: 400 | 403 | 409 | 412 | 503,
+  code: string,
+  message: string,
+) => ({
+  status,
+  body: { error: { code, message } },
 });
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -83,11 +96,14 @@ const reject = (error: string, status = 409): Result => ({
 });
 
 export const httpExecutor =
-  (url: string): Executor =>
+  (url: string, token?: string): Executor =>
   async (payload) => {
-    const response = await fetch(`${url}/workflow/agents`, {
+    const response = await fetch(`${url}${payload.path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10_000),
     });
@@ -119,8 +135,231 @@ export class AgentsBackend {
     string,
     { body: string; response: Detail; expires: number }
   >();
+  private registry: Registry = {};
+  private readonly unavailable = new Set<string>();
+  private mutation = Promise.resolve();
 
-  constructor(private readonly dispatch: Executor) {}
+  constructor(
+    private readonly dispatch: Executor,
+    private readonly admin?: Admin,
+    private readonly store?: Store,
+  ) {}
+
+  async initialize(): Promise<void> {
+    if (!this.admin || !this.store) return;
+    this.registry = await this.store.load();
+    for (const [id, entry] of Object.entries(this.registry)) {
+      try {
+        if (!(await verified(this.admin, id, entry.tab)))
+          this.unavailable.add(id);
+      } catch {
+        this.unavailable.add(id);
+      }
+    }
+  }
+
+  private serial<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.mutation.then(work);
+    this.mutation = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
+  }
+
+  private definition(id: string): Definition | undefined {
+    if (id === workflow.id) return workflow;
+    if (this.unavailable.has(id)) return undefined;
+    return this.registry[id]?.definition;
+  }
+
+  private active(id: string): boolean {
+    return [...this.jobs.values()].some(
+      ({ run }) =>
+        run.target?.kind === "workflow" &&
+        run.target.workflowId === id &&
+        ["queued", "running", "paused"].includes(run.status),
+    );
+  }
+
+  private guard(id: string, match?: string) {
+    if (id === workflow.id)
+      return errorResponse(403, "forbidden", "Core is read-only");
+    const entry = this.registry[id];
+    if (!entry) return missing("Workflow");
+    if (this.unavailable.has(id))
+      return errorResponse(
+        503,
+        "workflow_unavailable",
+        "Workflow deployment is unavailable",
+      );
+    if (match && match !== `"v${entry.definition.version}"`)
+      return errorResponse(
+        412,
+        "precondition_failed",
+        "Workflow version has changed",
+      );
+    if (this.active(id))
+      return errorResponse(409, "workflow_active", "Workflow has active runs");
+    return null;
+  }
+
+  private async create(input: Input) {
+    const errors = validate(input);
+    if (errors.length) return invalid(errors.join("; "));
+    if (!this.admin || !this.store)
+      return errorResponse(
+        503,
+        "workflow_unavailable",
+        "Workflow administration unavailable",
+      );
+    const tab = tabFor(input);
+    let id: string;
+    let deployed = false;
+    try {
+      id = await this.admin.create(tab);
+      deployed = true;
+    } catch {
+      return errorResponse(
+        503,
+        "deployment_failed",
+        "Node-RED deployment failed",
+      );
+    }
+    try {
+      if (!(await verified(this.admin, id, tab)))
+        throw new Error("Deployed tab differs");
+      const definition: Definition = {
+        name: input.name ?? tab.label,
+        description: input.description,
+        engine: "node-red",
+        specificationVersion: "managed-v1",
+        specification: input.specification,
+        id,
+        version: 1,
+        readOnly: false,
+        createdAt: new Date().toISOString(),
+      };
+      const next = { ...this.registry, [id]: { definition, tab } };
+      await this.store.save(next);
+      this.registry = next;
+      return { status: 201 as const, body: definition };
+    } catch {
+      if (deployed) {
+        try {
+          await this.admin.delete(id);
+          if (await this.admin.get(id)) throw new Error("Cleanup failed");
+        } catch {
+          this.unavailable.add(id);
+        }
+      }
+      return errorResponse(
+        503,
+        "deployment_failed",
+        "Workflow could not be committed",
+      );
+    }
+  }
+
+  private async replace(id: string, input: Input, match?: string) {
+    const guarded = this.guard(id, match);
+    if (guarded) return guarded;
+    const errors = validate(input);
+    if (errors.length) return invalid(errors.join("; "));
+    if (!this.admin || !this.store)
+      return errorResponse(
+        503,
+        "workflow_unavailable",
+        "Workflow administration unavailable",
+      );
+    const old = this.registry[id];
+    // Keep the private ingress stable across replacements of the same workflow.
+    const marker = old.tab.info.replace("AaaS managed ", "");
+    const tab = tabFor(input, marker);
+    try {
+      await this.admin.update(id, tab);
+      if (!(await verified(this.admin, id, tab)))
+        throw new Error("Deployed tab differs");
+    } catch {
+      try {
+        if (!(await verified(this.admin, id, old.tab))) {
+          await this.admin.update(id, old.tab);
+          if (!(await verified(this.admin, id, old.tab)))
+            throw new Error("Restore failed");
+        }
+      } catch {
+        this.unavailable.add(id);
+      }
+      return errorResponse(
+        503,
+        "deployment_failed",
+        "Node-RED deployment failed",
+      );
+    }
+    const definition: Definition = {
+      ...old.definition,
+      name: input.name ?? tab.label,
+      description: input.description,
+      specification: input.specification,
+      version: old.definition.version + 1,
+    };
+    try {
+      const next = { ...this.registry, [id]: { definition, tab } };
+      await this.store.save(next);
+      this.registry = next;
+    } catch {
+      try {
+        await this.admin.update(id, old.tab);
+        if (!(await verified(this.admin, id, old.tab)))
+          throw new Error("Restore failed");
+      } catch {
+        this.unavailable.add(id);
+      }
+      return errorResponse(
+        503,
+        "registry_failed",
+        "Workflow could not be committed",
+      );
+    }
+    return { status: 200 as const, body: definition };
+  }
+
+  private async remove(id: string) {
+    const guarded = this.guard(id);
+    if (guarded) return guarded;
+    if (!this.admin || !this.store)
+      return errorResponse(
+        503,
+        "workflow_unavailable",
+        "Workflow administration unavailable",
+      );
+    try {
+      await this.admin.delete(id);
+      if (await this.admin.get(id)) throw new Error("Tab still present");
+    } catch {
+      this.unavailable.add(id);
+      return errorResponse(
+        503,
+        "deployment_failed",
+        "Node-RED deletion could not be confirmed",
+      );
+    }
+    this.unavailable.add(id);
+    try {
+      const next = { ...this.registry };
+      delete next[id];
+      await this.store.save(next);
+      this.registry = next;
+      this.unavailable.delete(id);
+      return { status: 200 as const, body: { success: true } };
+    } catch {
+      return errorResponse(
+        503,
+        "registry_failed",
+        "Workflow removal could not be committed",
+      );
+    }
+  }
 
   private page<T>(items: T[], cursor: string | undefined, limit: number) {
     const offset = cursor === undefined ? 0 : Number(cursor);
@@ -428,9 +667,9 @@ export class AgentsBackend {
     return result;
   }
 
-  private async send(job: Job, text: string) {
+  private async send(job: Job, text: string, path: string) {
     try {
-      await this.dispatch({ runId: job.run.id, text });
+      await this.dispatch({ runId: job.run.id, text, path });
       // A start can arrive before the dispatch response.
     } catch {
       if (job.run.status === "running")
@@ -450,85 +689,121 @@ export class AgentsBackend {
         ...notImplementedRoutes.workflows,
         listWorkflows: async ({ query }) => {
           const page = this.page(
-            query.projectId ? [] : [workflow],
+            query.projectId
+              ? []
+              : [
+                  workflow,
+                  ...Object.entries(this.registry)
+                    .filter(([id]) => !this.unavailable.has(id))
+                    .map(([, entry]) => entry.definition),
+                ],
             query.cursor,
             query.limit,
           );
           return page ? { status: 200, body: page } : invalid("Invalid cursor");
         },
-        getWorkflow: async ({ params }) =>
-          params.workflowId === workflow.id
-            ? { status: 200, body: workflow }
-            : missing("Workflow"),
+        getWorkflow: async ({ params, res }) => {
+          const definition = this.definition(params.workflowId);
+          if (!definition)
+            return this.unavailable.has(params.workflowId)
+              ? errorResponse(
+                  503,
+                  "workflow_unavailable",
+                  "Workflow deployment is unavailable",
+                )
+              : missing("Workflow");
+          res.setHeader("ETag", `"v${definition.version}"`);
+          return { status: 200, body: definition };
+        },
         validateWorkflow: async ({ body }) => {
-          const errors = [
-            body.projectId && "Projects are not supported",
-            body.engine !== "node-red" && "engine must be node-red",
-            body.specificationVersion !== "5.x" &&
-              "specificationVersion must be 5.x",
-            (!record(body.specification) ||
-              body.specification.endpoint !== "/workflow/agents") &&
-              "specification.endpoint must be /workflow/agents",
-          ].filter((item): item is string => !!item);
+          const errors = validate(body);
           return { status: 200, body: { valid: errors.length === 0, errors } };
         },
+        createWorkflow: async ({ body, res }) => {
+          const result = await this.serial(() => this.create(body));
+          if (result.status === 201) res.setHeader("ETag", '"v1"');
+          return result;
+        },
+        updateWorkflow: async ({ params, body, headers, res }) => {
+          const result = await this.serial(() =>
+            this.replace(params.workflowId, body, headers["if-match"]),
+          );
+          if (result.status === 200)
+            res.setHeader("ETag", `"v${result.body.version}"`);
+          return result;
+        },
+        deleteWorkflow: async ({ params }) =>
+          this.serial(() => this.remove(params.workflowId)),
       },
       runs: {
         ...notImplementedRoutes.runs,
-        startRun: async ({ body, headers }) => {
-          const key = headers["idempotency-key"];
-          const previous = key && this.keys.get(key);
-          if (previous && previous.expires > Date.now())
-            return previous.body === canonical(body)
-              ? { status: 202, body: structuredClone(previous.response) }
-              : {
-                  status: 409,
-                  body: {
-                    error: {
-                      code: "idempotency_conflict",
-                      message: "Key already used for another body",
+        startRun: ({ body, headers }) =>
+          this.serial(async () => {
+            const key = headers["idempotency-key"];
+            const previous = key && this.keys.get(key);
+            if (previous && previous.expires > Date.now())
+              return previous.body === canonical(body)
+                ? { status: 202, body: structuredClone(previous.response) }
+                : {
+                    status: 409,
+                    body: {
+                      error: {
+                        code: "idempotency_conflict",
+                        message: "Key already used for another body",
+                      },
                     },
-                  },
-                };
-          if (
-            body.projectId ||
-            body.engineOptions ||
-            body.conversationId ||
-            body.target?.kind !== "workflow" ||
-            body.target.workflowId !== workflow.id ||
-            !record(body.input) ||
-            !text(body.input.text) ||
-            Object.keys(body.input).some((field) => field !== "text")
-          )
-            return invalid("Only workflow text input is supported");
-          const prompt = (body.input as { text: string }).text;
-          const now = new Date().toISOString();
-          const run: Run = {
-            id: randomUUID(),
-            target: body.target,
-            input: body.input,
-            workflowVersion: 1,
-            status: "queued",
-            createdAt: now,
-            updatedAt: now,
-          };
-          const detail: Detail = { run, conversations: [] };
-          this.runs.set(run.id, detail);
-          this.events.set(run.id, []);
-          this.update(run, "queued");
-          const job: Job = { run, executions: new Map(), failed: false };
-          this.jobs.set(run.id, job);
-          const response = structuredClone(detail);
-          if (key)
-            this.keys.set(key, {
-              body: canonical(body),
-              response,
-              expires: Date.now() + 86_400_000,
-            });
-          this.update(run, "running");
-          setImmediate(() => void this.send(job, prompt));
-          return { status: 202, body: response };
-        },
+                  };
+            if (
+              body.projectId ||
+              body.engineOptions ||
+              body.conversationId ||
+              body.target?.kind !== "workflow" ||
+              !record(body.input) ||
+              !text(body.input.text) ||
+              Object.keys(body.input).some((field) => field !== "text")
+            )
+              return invalid("Only workflow text input is supported");
+            const definition = this.definition(body.target.workflowId);
+            if (!definition)
+              return this.unavailable.has(body.target.workflowId)
+                ? errorResponse(
+                    503,
+                    "workflow_unavailable",
+                    "Workflow deployment is unavailable",
+                  )
+                : missing("Workflow");
+            const prompt = (body.input as { text: string }).text;
+            const now = new Date().toISOString();
+            const run: Run = {
+              id: randomUUID(),
+              target: body.target,
+              input: body.input,
+              workflowVersion: definition.version,
+              status: "queued",
+              createdAt: now,
+              updatedAt: now,
+            };
+            const detail: Detail = { run, conversations: [] };
+            this.runs.set(run.id, detail);
+            this.events.set(run.id, []);
+            this.update(run, "queued");
+            const job: Job = { run, executions: new Map(), failed: false };
+            this.jobs.set(run.id, job);
+            const response = structuredClone(detail);
+            if (key)
+              this.keys.set(key, {
+                body: canonical(body),
+                response,
+                expires: Date.now() + 86_400_000,
+              });
+            this.update(run, "running");
+            const path =
+              definition.id === workflow.id
+                ? "/workflow/agents"
+                : entryOf(this.registry[definition.id].tab);
+            setImmediate(() => void this.send(job, prompt, path));
+            return { status: 202, body: response };
+          }),
         getRun: async ({ params }) => {
           const detail = this.runs.get(params.runId);
           return detail

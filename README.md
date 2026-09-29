@@ -48,7 +48,7 @@ make demo-express
 
 `API_TOKEN=dev-token make demo-node-red` builds two Docker containers, waits for the private Node-RED flow to load, and walks through the unchanged authenticated workflow/run contract at `http://127.0.0.1:3093`. Node-RED stays private; the host needs Docker Compose, curl, Node/npm, Make, and `ss`, but no Node-RED installation. See [`examples/server-node-red/README.md`](examples/server-node-red/README.md).
 
-`API_TOKEN=dev-token make demo-node-red-agents` runs the Dockerized, real `opencode/big-pickle` parallel-agent workflow at `http://127.0.0.1:3094` with no provider credentials. See [`examples/server-node-red-agents/README.md`](examples/server-node-red-agents/README.md) for lifecycle discovery, version pins, and limits.
+`make demo-node-red-agents` runs the Dockerized, real `opencode/big-pickle` agent workflows on a disposable Compose project with a Docker-assigned loopback API port and no provider credentials. It exercises managed workflow creation, execution, updating and deletion. Named instances can run concurrently via `make start-node-red-agents INSTANCE=alpha` with distinct `API_TOKEN`, `INTERNAL_TOKEN` and `NODE_RED_ADMIN_TOKEN`; use `make status-node-red-agents INSTANCE=alpha` to find its current URL. See [`examples/server-node-red-agents/README.md`](examples/server-node-red-agents/README.md) for the lifecycle, credentials and persistence instructions.
 
 To start the default example server instead:
 
@@ -72,6 +72,9 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make demo-opencode` | Build Docker and run the real published-port OpenCode walkthrough. |
 | `make demo-node-red` | Build Docker and run the private Node-RED workflow walkthrough. |
 | `make demo-node-red-agents` | Build Docker and run the real lifecycle-observed agent walkthrough. |
+| `make start-node-red-agents INSTANCE=name` | Start a named API/Node-RED pair (requires three distinct tokens). |
+| `make status-node-red-agents INSTANCE=name` / `make logs-node-red-agents INSTANCE=name` | Locate its URL and inspect its containers/logs. |
+| `make stop-node-red-agents INSTANCE=name` / `make cleanup-node-red-agents INSTANCE=name` | Stop one project, retaining its volumes, or remove its volumes too. |
 | `make start` / `make dev` | Start the Express example normally or in watch mode. |
 | `make start-opencode` | Start the OpenCode-backed example server locally. |
 | `make start-node-red` | Start the Node-RED-backed API server locally (requires Node-RED reachable at `NODE_RED_URL`). |
