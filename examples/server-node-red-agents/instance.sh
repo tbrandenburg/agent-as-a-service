@@ -43,7 +43,17 @@ if [[ "$action" == demo ]]; then
   project="aas-node-red-agents-demo-$(< /proc/sys/kernel/random/uuid)"
   export API_TOKEN="${API_TOKEN:-dev-token}" INTERNAL_TOKEN="${INTERNAL_TOKEN:-internal-observer-demo-token}" NODE_RED_ADMIN_TOKEN="${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}"
   credentials
-  cleanup_demo() { compose down --volumes --remove-orphans; }
+  cleanup_demo() {
+    local status=$? image
+    trap - EXIT
+    compose down --volumes --remove-orphans || status=1
+    for image in "${project}-api:latest" "${project}-node-red:latest"; do
+      if docker image inspect "$image" >/dev/null 2>&1; then
+        docker image rm "$image" >/dev/null || status=1
+      fi
+    done
+    exit "$status"
+  }
   trap cleanup_demo EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM

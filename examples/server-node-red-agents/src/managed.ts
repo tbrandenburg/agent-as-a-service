@@ -124,7 +124,7 @@ export function tabFor(input: Input, marker: string = randomUUID()): Tab {
     timeout: "",
     timeoutType: "num",
     concurrency: 4,
-    retryMaxAttempts: 1,
+    retryMaxAttempts: 2,
     auto: false,
     wires: [
       node.wires[0].map((id) => `${prefix}-${id}`),

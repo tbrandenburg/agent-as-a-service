@@ -22,6 +22,16 @@ module.exports = {
     },
   },
   nodeRedAgentsLifecycleObserver: async (record) => {
+    if (record.type === "execution.terminal" && record.status !== "completed") {
+      const detail = record.output?.errorDetail;
+      console.error("Agent execution failed", {
+        nodeId: record.nodeId,
+        errorType: typeof detail?.name === "string" ? detail.name : "unknown",
+        exitCode: record.output?.exitCode ?? null,
+        signal: record.output?.signal ?? null,
+        timedOut: record.output?.timedOut === true,
+      });
+    }
     const response = await fetch("http://api:3095/observations", {
       method: "POST",
       headers: {
