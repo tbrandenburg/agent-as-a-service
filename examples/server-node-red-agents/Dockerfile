@@ -5,6 +5,7 @@ COPY --chown=node:node packages/ ./packages/
 COPY --chown=node:node examples/ ./examples/
 COPY --chown=node:node openapi.json ./openapi.json
 RUN npm ci
+RUN mkdir -p /workspace-data && chown node:node /workspace-data
 USER node
 EXPOSE 3094
 CMD ["npm", "run", "start:node-red-agents"]

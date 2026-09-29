@@ -2,13 +2,22 @@ import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { createApp } from "../../server-express/src/index.js";
 import { AgentsBackend, httpExecutor } from "./backend.js";
+import { JsonStore, NodeRedAdmin } from "./admin.js";
 
 const token = process.env.API_TOKEN ?? "dev-token";
 const internalToken = process.env.INTERNAL_TOKEN;
 if (!internalToken || internalToken === token)
   throw new Error("A distinct INTERNAL_TOKEN is required");
+const adminToken = process.env.NODE_RED_ADMIN_TOKEN;
+if (!adminToken || adminToken === token || adminToken === internalToken)
+  throw new Error("A distinct NODE_RED_ADMIN_TOKEN is required");
+const nodeRedUrl = process.env.NODE_RED_URL ?? "http://node-red:1880";
 const backend = new AgentsBackend(
-  httpExecutor(process.env.NODE_RED_URL ?? "http://node-red:1880"),
+  httpExecutor(nodeRedUrl, internalToken),
+  new NodeRedAdmin(nodeRedUrl, adminToken),
+  new JsonStore(
+    process.env.WORKFLOW_REGISTRY ?? "/workspace-data/workflows.json",
+  ),
 );
 const internal = express();
 internal.use(express.json({ limit: "1mb" }));
@@ -38,6 +47,19 @@ internal.post("/finalize", (request, response) => {
   response.status(result.status).json(result.body);
 });
 const privateServer = internal.listen(3095, "0.0.0.0");
+const admin = new NodeRedAdmin(nodeRedUrl, adminToken);
+const deadline = Date.now() + 90_000;
+while (true) {
+  try {
+    if (await admin.get("agents-tab")) break;
+  } catch {
+    // Node-RED starts after the API container in Compose.
+  }
+  if (Date.now() > deadline)
+    throw new Error("Node-RED Core tab did not become ready");
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+}
+await backend.initialize();
 const publicServer = createApp({
   token,
   implementation: backend.implementation(),

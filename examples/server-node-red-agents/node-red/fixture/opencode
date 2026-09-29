@@ -6,7 +6,7 @@ if (process.argv.includes("--version")) {
   process.exit(0);
 }
 const prompt = process.argv.at(-1) ?? "";
-const duration = prompt.startsWith("In one sentence, draft a release note") ? 365_000 : 100;
+const duration = prompt.startsWith("In one sentence, draft a release note") || prompt === "hold" ? 365_000 : 100;
 setTimeout(() => {
   const sessionID = `fixture-${randomUUID()}`;
   const event = { type: "text", sessionID, part: { text: `Fixture response to ${prompt}` } };

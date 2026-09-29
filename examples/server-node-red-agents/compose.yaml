@@ -7,17 +7,28 @@ services:
     environment:
       API_TOKEN: ${API_TOKEN:-dev-token}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
+      NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
       NODE_RED_URL: http://node-red:1880
+    volumes:
+      - api-data:/workspace-data
     ports:
-      - "127.0.0.1:3094:3094"
+      - target: 3094
+        host_ip: 127.0.0.1
   node-red:
     build:
       context: ../..
       dockerfile: examples/server-node-red-agents/node-red/Dockerfile
     environment:
+      API_TOKEN: ${API_TOKEN:-dev-token}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
+      NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
       CONTROLLED_FIXTURE: ${CONTROLLED_FIXTURE:-false}
+    volumes:
+      - node-red-data:/data
     depends_on:
       api:
         condition: service_started
     # Admin API and internal callback port are only reachable on the Compose network.
+volumes:
+  api-data:
+  node-red-data:
