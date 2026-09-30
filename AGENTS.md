@@ -42,15 +42,13 @@ The OpenCode Docker example exposes the complete contract. Conversation/message/
 
 When changing the contract, run `make generate` before `make check` and include the regenerated artifacts. Keep provider-specific logic out of `packages/contract/`.
 
-## Node-RED adapter boundary (KISS / YAGNI)
+## Node-RED adapter principles
 
-For `examples/server-node-red-agents/`, treat Node-RED as the workflow engine. The server maps HTTP resources to the existing Node-RED Admin API, process-scoped run workers, runtime hooks already in use, and the published agent lifecycle signal. It does not interpret or schedule arbitrary flow graphs itself. Core and managed workflows share the same execution path; managed workflow support is deliberately restricted to `managed-v1` rather than a promise to import any Node-RED graph.
-
-- Before adding plumbing, name the **specific contract behavior** that is missing, the Node-RED primitive that supplies it, and the smallest mapping between them. Use existing run events, native metrics/error logs, or a typed `501` for unsupported operations where that honestly satisfies the requirement. Do not add speculative observability, retry, storage, orchestration, or provider abstractions.
-- Keep run-wide facts on the run worker and node-specific facts at their actual source. Do not require user workflows or community nodes to carry adapter metadata or honor agent-only conventions such as `msg.cwd`. Node-RED receive/send activity is not proof of node success; report unconfirmed completion honestly.
-- Isolate an intermittent failure with existing logs, events, and a direct CLI reproduction before expanding the adapter. Changes to a published node's failure fields belong in `node-red-agents` when evidence points there; avoid parsing its private output or adding per-version knowledge to this server.
-- If a request cannot be met through a small mapping, **signal early** in the issue or PR: describe the missing Node-RED capability, the added lifecycle/state cost, and the smallest limited alternative. Agree on scope before building another callback protocol, worker host, tracing store, or general graph verifier. Keep manual E2E checks proportional to the behavior being changed.
-
+- Let Node-RED execute workflows; map only required contract behavior through its existing interfaces.
+- Keep the mapping generic. Do not depend on private node internals or require instrumentation in each workflow.
+- Add no abstraction or state for hypothetical needs. Report unsupported behavior and uncertain outcomes honestly.
+- Before adding a subsystem, state the concrete missing behavior, why native Node-RED mechanisms fall short, and its lifecycle cost. Signal that tradeoff early.
+- Diagnose intermittent failures with existing evidence before adding diagnostics or retries.
 
 ## Lessons Learned
 
