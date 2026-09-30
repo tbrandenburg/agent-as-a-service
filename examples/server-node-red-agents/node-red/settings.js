@@ -3,12 +3,11 @@ if (!token) throw new Error("INTERNAL_TOKEN is required");
 const adminToken = process.env.NODE_RED_ADMIN_TOKEN;
 if (!adminToken || adminToken === token || adminToken === process.env.API_TOKEN)
   throw new Error("A distinct NODE_RED_ADMIN_TOKEN is required");
-if (process.env.CONTROLLED_FIXTURE === "true") {
-  process.env.PATH = `/data/fixture:${process.env.PATH}`;
-}
 
 module.exports = {
   flowFile: "flows.json",
+  httpNodeRoot: process.env.WORKER_RUNTIME === "true" ? "/" : false,
+  fileWorkingDirectory: "/data/agent-work",
   adminAuth: {
     type: "credentials",
     users: [],

@@ -26,7 +26,7 @@ export const runs = t.router({
     body: d.runStart,
     responses: { 202: d.runDetail, ...c.errors, ...c.payloadTooLarge },
     summary: "Start an agent or workflow run",
-    description: `On 202, the returned run is immediately readable through getRun. Acceptance does not promise execution completion within a fixed time. Oversized inline file content returns 413 payload_too_large. ${c.idempotencyDescription}`,
+    description: `Only an explicit projectId selects a run working directory; omission means projectless/global and run.projectId is null, regardless of workflow or conversation project metadata. Every workflow may run in every accessible project. conversationId requests continuity only; it does not choose cwd. A run's separate process cwd does not isolate files, and overlapping runs may access the same directory. Nodes with absolute paths or their own path bases and workflow-created worktrees require explicit paths. Backends may reject unavailable or unauthorized projects before acceptance; project removal does not erase historical run attribution. On 202, the returned run is immediately readable through getRun. Acceptance does not promise execution completion within a fixed time. Oversized inline file content returns 413 payload_too_large. ${c.idempotencyDescription}`,
   },
   getRun: {
     method: "GET",

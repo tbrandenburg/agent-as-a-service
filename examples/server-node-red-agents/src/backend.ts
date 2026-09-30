@@ -5,6 +5,8 @@ import type { Admin, Store } from "./admin.js";
 import { verified } from "./admin.js";
 import { entryOf, tabFor, validate } from "./managed.js";
 import type { Definition, Input, Registry } from "./managed.js";
+import type { Tab } from "./managed.js";
+import { Projects, ProjectError } from "./projects.js";
 import { notImplementedRoutes } from "../../server-express/src/index.js";
 import type { ApiImplementation } from "../../server-express/src/index.js";
 
@@ -31,6 +33,8 @@ type Observation = {
   agentObservation?: { runId: string };
   input?: { invocation: string; prompt?: string; name?: string; args?: string };
   status?: "completed" | "failed" | "timeout";
+  sessionID?: string;
+  resumed?: boolean;
   output?: { payload?: unknown; errorMessage?: string };
 };
 type Execution = {
@@ -40,8 +44,14 @@ type Execution = {
   agent: string;
   input: string;
   terminal?: string;
+  sessionID?: string;
 };
-type Job = { run: Run; executions: Map<string, Execution>; failed: boolean };
+type Job = {
+  run: Run;
+  cwd?: string;
+  executions: Map<string, Execution>;
+  failed: boolean;
+};
 type Result = {
   status: number;
   body: { acknowledged?: boolean; conversationId?: string; error?: string };
@@ -50,6 +60,9 @@ export type Executor = (payload: {
   runId: string;
   text: string;
   path: string;
+  cwd?: string;
+  tab?: Tab;
+  sessionID?: string;
 }) => Promise<void>;
 
 const workflow: z.infer<typeof schemas.definition> = {
@@ -62,6 +75,72 @@ const workflow: z.infer<typeof schemas.definition> = {
   readOnly: true,
   createdAt: new Date().toISOString(),
 };
+const directTab = (): Tab => ({
+  id: "direct-tab",
+  label: "Direct writer",
+  info: "Private direct invocation",
+  configs: [],
+  nodes: [
+    {
+      id: "direct-in",
+      type: "http in",
+      url: "/agent/writer-agent",
+      method: "post",
+      wires: [["direct-entry"]],
+    },
+    {
+      id: "direct-entry",
+      type: "function",
+      name: "Accept direct run",
+      func: `if (msg.req?.headers?.authorization !== 'Bearer '+env.get('INTERNAL_TOKEN')) { msg.statusCode=401; msg.payload={error:'Unauthorized'}; return [null,msg]; } const {runId,text,sessionID}=msg.payload||{}; if (typeof runId!=='string'||!runId||typeof text!=='string'||!text.trim()) {msg.statusCode=400;msg.payload={error:'Invalid request'};return [null,msg];} const work={runId,payload:text,agentObservation:{runId}}; if (typeof sessionID==='string'&&sessionID) work.sessionID=sessionID; msg.statusCode=202;msg.payload={accepted:true};return [work,msg];`,
+      outputs: 2,
+      wires: [["writer-agent"], ["direct-response"]],
+    },
+    {
+      id: "writer-agent",
+      type: "agent",
+      name: "Writer",
+      agent: "opencode",
+      runtime: "direct",
+      invocation: "prompt",
+      model: "opencode/big-pickle",
+      modelType: "str",
+      prompt: "payload",
+      promptType: "msg",
+      auto: false,
+      wires: [["direct-success"], ["direct-failure"]],
+    },
+    {
+      id: "direct-success",
+      type: "function",
+      func: `if (msg.agentExecution?.status!=='completed'||typeof msg.payload!=='string'||!msg.payload.trim()) return [null,msg];msg.payload={runId:msg.runId,eventId:msg.runId+':completed',status:'completed',output:msg.payload};return [msg,null];`,
+      outputs: 2,
+      wires: [["direct-headers"], ["direct-failure"]],
+    },
+    {
+      id: "direct-failure",
+      type: "function",
+      func: `if (!msg.runId) return null;msg.payload={runId:msg.runId,eventId:msg.runId+':failed',status:'failed'};return msg;`,
+      outputs: 1,
+      wires: [["direct-headers"]],
+    },
+    {
+      id: "direct-headers",
+      type: "function",
+      func: `msg.method='POST';msg.url='http://api:3095/finalize';msg.headers={authorization:'Bearer '+env.get('INTERNAL_TOKEN'),'content-type':'application/json'};return msg;`,
+      outputs: 1,
+      wires: [["direct-request"]],
+    },
+    {
+      id: "direct-request",
+      type: "http request",
+      method: "use",
+      ret: "obj",
+      wires: [[]],
+    },
+    { id: "direct-response", type: "http response", wires: [] },
+  ],
+});
 const missing = (name: string) => ({
   status: 404 as const,
   body: { error: { code: "not_found", message: `${name} was not found` } },
@@ -130,6 +209,8 @@ export class AgentsBackend {
   >();
   private readonly phases = new Map<string, { body: string; result: Result }>();
   private readonly executionOwners = new Map<string, string>();
+  private readonly sessions = new Map<string, string>();
+  private readonly sessionDirectories = new Map<string, string>();
   private readonly finals = new Map<string, { body: string; result: Result }>();
   private readonly keys = new Map<
     string,
@@ -143,9 +224,12 @@ export class AgentsBackend {
     private readonly dispatch: Executor,
     private readonly admin?: Admin,
     private readonly store?: Store,
+    private readonly projects?: Projects,
+    private readonly stopWorker?: (id: string) => Promise<void>,
   ) {}
 
   async initialize(): Promise<void> {
+    await this.projects?.initialize();
     if (!this.admin || !this.store) return;
     this.registry = await this.store.load();
     for (const [id, entry] of Object.entries(this.registry)) {
@@ -515,10 +599,13 @@ export class AgentsBackend {
         !text(observation.input.prompt ?? observation.input.args)
       )
         return reject("Invalid or duplicate execution start");
-      // A start repairs a lost best-effort deployment notice.
-      const current = this.inventory.get(observation.nodeId);
       if (
-        (current && current.deploymentId !== observation.deploymentId) ||
+        job.run.target?.kind === "agent" &&
+        observation.nodeId !== job.run.target.agentId
+      )
+        return reject("Unexpected agent execution");
+      // A start repairs a lost best-effort deployment notice.
+      if (
         this.closedDeployments.has(
           `${observation.nodeId}\0${observation.deploymentId}`,
         )
@@ -533,16 +620,18 @@ export class AgentsBackend {
         this.deployments.get(observation.nodeId) ?? new Set<string>();
       generations.add(observation.deploymentId);
       this.deployments.set(observation.nodeId, generations);
-      const id = randomUUID();
+      const id = job.run.conversationId ?? randomUUID();
       const conversation: Conversation = {
         id,
         agentId: observation.nodeId,
         title: observation.agentName || `${observation.nodeId} conversation`,
         createdAt: new Date().toISOString(),
       };
-      this.conversations.set(id, conversation);
-      this.messages.set(id, []);
-      this.conversationEvents.set(id, []);
+      if (!this.conversations.has(id)) {
+        this.conversations.set(id, conversation);
+        this.messages.set(id, []);
+        this.conversationEvents.set(id, []);
+      }
       this.add(
         id,
         "user",
@@ -557,10 +646,15 @@ export class AgentsBackend {
         input: canonical(observation.input),
       });
       this.executionOwners.set(observation.executionId, runId);
-      this.runs.get(runId)!.conversations!.push({
-        conversationId: id,
-        nodeId: observation.nodeId,
-      });
+      if (
+        !this.runs
+          .get(runId)!
+          .conversations!.some((link) => link.conversationId === id)
+      )
+        this.runs.get(runId)!.conversations!.push({
+          conversationId: id,
+          nodeId: observation.nodeId,
+        });
       this.event(
         job.run,
         "execution.started",
@@ -594,6 +688,15 @@ export class AgentsBackend {
     )
       return reject("Invalid successful output");
     execution.terminal = observation.status;
+    if (job.run.conversationId && observation.resumed !== true)
+      job.failed = true;
+    if (observation.status === "completed" && text(observation.sessionID))
+      this.sessions.set(execution.conversationId, observation.sessionID);
+    if (observation.status === "completed" && text(observation.sessionID)) {
+      const directory = this.jobs.get(runId)?.cwd;
+      if (directory)
+        this.sessionDirectories.set(execution.conversationId, directory);
+    }
     if (observation.status === "completed")
       this.add(
         execution.conversationId,
@@ -605,7 +708,13 @@ export class AgentsBackend {
     this.event(
       job.run,
       "execution.terminal",
-      { status: observation.status, nodeId: observation.nodeId },
+      {
+        status: observation.status,
+        nodeId: observation.nodeId,
+        ...(observation.resumed !== undefined
+          ? { resumed: observation.resumed }
+          : {}),
+      },
       observation.executionId,
     );
     this.conversationEvent(execution.conversationId, job.run, "run.updated", {
@@ -642,14 +751,21 @@ export class AgentsBackend {
       return reject("Run is not active");
     if (
       value.status === "completed" &&
-      (job.failed ||
+      ((job.failed && !job.run.conversationId) ||
         job.executions.size === 0 ||
         [...job.executions.values()].some(
           (execution) => execution.terminal !== "completed",
         ))
     )
       return reject("Unacknowledged execution");
-    if (value.status === "completed")
+    if (value.status === "completed" && job.failed)
+      this.update(job.run, "failed", {
+        error: {
+          code: "resume_unconfirmed",
+          message: "Provider did not confirm continuation",
+        },
+      });
+    else if (value.status === "completed")
       this.update(job.run, "completed", { output: value.output as string });
     else
       this.update(job.run, "failed", {
@@ -664,12 +780,51 @@ export class AgentsBackend {
       });
     const result = { status: 200, body: { acknowledged: true } };
     this.finals.set(value.runId, { body, result });
+    if (this.stopWorker)
+      setImmediate(
+        () => void this.stopWorker!(value.runId as string).catch(() => {}),
+      );
     return result;
   }
 
-  private async send(job: Job, text: string, path: string) {
+  workerFailed(id: string) {
+    const job = this.jobs.get(id);
+    if (job && ["queued", "running"].includes(job.run.status))
+      this.update(job.run, "failed", {
+        error: { code: "worker_failed", message: "Execution worker stopped" },
+      });
+  }
+
+  private projectError(error: unknown) {
+    if (error instanceof ProjectError)
+      return {
+        status: error.status,
+        body: { error: { code: error.code, message: error.message } },
+      };
+    return errorResponse(
+      503,
+      "project_failed",
+      "Project storage is unavailable",
+    );
+  }
+
+  private async send(
+    job: Job,
+    text: string,
+    path: string,
+    cwd?: string,
+    tab?: Tab,
+    sessionID?: string,
+  ) {
     try {
-      await this.dispatch({ runId: job.run.id, text, path });
+      await this.dispatch({
+        runId: job.run.id,
+        text,
+        path,
+        cwd,
+        tab,
+        sessionID,
+      });
       // A start can arrive before the dispatch response.
     } catch {
       if (job.run.status === "running")
@@ -685,18 +840,101 @@ export class AgentsBackend {
   implementation(): ApiImplementation {
     return {
       ...notImplementedRoutes,
+      projects: {
+        ...notImplementedRoutes.projects,
+        listProjects: async ({ query }) => {
+          if (!this.projects)
+            return errorResponse(
+              503,
+              "project_unavailable",
+              "Project storage unavailable",
+            );
+          const page = this.page(
+            this.projects.list(),
+            query.cursor,
+            query.limit,
+          );
+          return page ? { status: 200, body: page } : invalid("Invalid cursor");
+        },
+        getProject: async ({ params }) => {
+          const project = this.projects?.get(params.projectId);
+          return project ? { status: 200, body: project } : missing("Project");
+        },
+        createProject: async ({ body }) => {
+          if (!this.projects)
+            return errorResponse(
+              503,
+              "project_unavailable",
+              "Project storage unavailable",
+            );
+          return this.serial(async () => {
+            try {
+              return {
+                status: 201 as const,
+                body: await this.projects!.create(body),
+              };
+            } catch (error) {
+              return this.projectError(error);
+            }
+          });
+        },
+        updateProject: async ({ params, body }) => {
+          if (!this.projects)
+            return errorResponse(
+              503,
+              "project_unavailable",
+              "Project storage unavailable",
+            );
+          return this.serial(async () => {
+            try {
+              return {
+                status: 200 as const,
+                body: await this.projects!.rename(params.projectId, body.name),
+              };
+            } catch (error) {
+              return this.projectError(error);
+            }
+          });
+        },
+        deleteProject: async ({ params }) => {
+          if (!this.projects)
+            return errorResponse(
+              503,
+              "project_unavailable",
+              "Project storage unavailable",
+            );
+          return this.serial(async () => {
+            if (
+              [...this.jobs.values()].some(
+                ({ run }) =>
+                  run.projectId === params.projectId &&
+                  ["queued", "running", "paused"].includes(run.status),
+              )
+            )
+              return errorResponse(
+                409,
+                "project_active",
+                "Project has active runs",
+              );
+            try {
+              await this.projects!.remove(params.projectId);
+              return { status: 200 as const, body: { success: true } };
+            } catch (error) {
+              return this.projectError(error);
+            }
+          });
+        },
+      },
       workflows: {
         ...notImplementedRoutes.workflows,
         listWorkflows: async ({ query }) => {
           const page = this.page(
-            query.projectId
-              ? []
-              : [
-                  workflow,
-                  ...Object.entries(this.registry)
-                    .filter(([id]) => !this.unavailable.has(id))
-                    .map(([, entry]) => entry.definition),
-                ],
+            [
+              workflow,
+              ...Object.entries(this.registry)
+                .filter(([id]) => !this.unavailable.has(id))
+                .map(([, entry]) => entry.definition),
+            ],
             query.cursor,
             query.limit,
           );
@@ -754,17 +992,41 @@ export class AgentsBackend {
                     },
                   };
             if (
-              body.projectId ||
               body.engineOptions ||
-              body.conversationId ||
-              body.target?.kind !== "workflow" ||
+              !body.target ||
               !record(body.input) ||
               !text(body.input.text) ||
               Object.keys(body.input).some((field) => field !== "text")
             )
-              return invalid("Only workflow text input is supported");
-            const definition = this.definition(body.target.workflowId);
-            if (!definition)
+              return invalid("Only text input is supported");
+            if (
+              [...this.jobs.values()].filter(({ run }) =>
+                ["queued", "running", "paused"].includes(run.status),
+              ).length >= 4
+            )
+              return errorResponse(
+                503,
+                "workers_busy",
+                "Maximum of four concurrent execution workers reached",
+              );
+            if (
+              body.target.kind === "agent" &&
+              body.target.agentId !== "writer-agent"
+            )
+              return {
+                status: 501 as const,
+                body: {
+                  error: {
+                    code: "not_implemented",
+                    message: "Agent target is not configured",
+                  },
+                },
+              };
+            const definition =
+              body.target.kind === "workflow"
+                ? this.definition(body.target.workflowId)
+                : undefined;
+            if (body.target.kind === "workflow" && !definition)
               return this.unavailable.has(body.target.workflowId)
                 ? errorResponse(
                     503,
@@ -772,22 +1034,77 @@ export class AgentsBackend {
                     "Workflow deployment is unavailable",
                   )
                 : missing("Workflow");
+            const prior =
+              body.conversationId &&
+              this.conversations.get(body.conversationId);
+            if (
+              body.conversationId &&
+              (!prior ||
+                body.target.kind !== "agent" ||
+                prior.agentId !== body.target.agentId ||
+                !this.sessions.has(body.conversationId))
+            )
+              return missing("Conversation");
+            let cwd: string | undefined;
+            if (this.projects) {
+              try {
+                cwd = await this.projects.cwd(body.projectId);
+              } catch (error) {
+                return this.projectError(error);
+              }
+            } else if (body.projectId) return missing("Project");
+            if (
+              body.conversationId &&
+              cwd &&
+              this.sessionDirectories.get(body.conversationId) !== cwd
+            )
+              return errorResponse(
+                409,
+                "conversation_directory_conflict",
+                "OpenCode continuation requires the original working directory",
+              );
+            const tab =
+              body.target.kind === "agent"
+                ? directTab()
+                : definition!.id === workflow.id
+                  ? await this.admin?.get("agents-tab")
+                  : structuredClone(this.registry[definition!.id].tab);
+            if (this.projects && !tab)
+              return errorResponse(
+                503,
+                "workflow_unavailable",
+                "Workflow snapshot unavailable",
+              );
             const prompt = (body.input as { text: string }).text;
             const now = new Date().toISOString();
             const run: Run = {
               id: randomUUID(),
+              projectId: body.projectId ?? null,
               target: body.target,
               input: body.input,
-              workflowVersion: definition.version,
+              ...(definition ? { workflowVersion: definition.version } : {}),
+              ...(body.conversationId
+                ? { conversationId: body.conversationId }
+                : {}),
               status: "queued",
               createdAt: now,
               updatedAt: now,
             };
-            const detail: Detail = { run, conversations: [] };
+            const detail: Detail = {
+              run,
+              conversations: body.conversationId
+                ? [
+                    {
+                      conversationId: body.conversationId,
+                      nodeId: "writer-agent",
+                    },
+                  ]
+                : [],
+            };
             this.runs.set(run.id, detail);
             this.events.set(run.id, []);
             this.update(run, "queued");
-            const job: Job = { run, executions: new Map(), failed: false };
+            const job: Job = { run, cwd, executions: new Map(), failed: false };
             this.jobs.set(run.id, job);
             const response = structuredClone(detail);
             if (key)
@@ -798,10 +1115,25 @@ export class AgentsBackend {
               });
             this.update(run, "running");
             const path =
-              definition.id === workflow.id
-                ? "/workflow/agents"
-                : entryOf(this.registry[definition.id].tab);
-            setImmediate(() => void this.send(job, prompt, path));
+              body.target.kind === "agent"
+                ? "/agent/writer-agent"
+                : definition!.id === workflow.id
+                  ? "/workflow/agents"
+                  : entryOf(this.registry[definition!.id].tab);
+            const sessionID = body.conversationId
+              ? this.sessions.get(body.conversationId)
+              : undefined;
+            setImmediate(
+              () =>
+                void this.send(
+                  job,
+                  prompt,
+                  path,
+                  cwd,
+                  tab ?? undefined,
+                  sessionID,
+                ),
+            );
             return { status: 202, body: response };
           }),
         getRun: async ({ params }) => {

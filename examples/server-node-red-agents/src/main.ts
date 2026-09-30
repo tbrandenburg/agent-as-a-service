@@ -1,8 +1,9 @@
 import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { createApp } from "../../server-express/src/index.js";
-import { AgentsBackend, httpExecutor } from "./backend.js";
+import { AgentsBackend } from "./backend.js";
 import { JsonStore, NodeRedAdmin } from "./admin.js";
+import { Projects } from "./projects.js";
 
 const token = process.env.API_TOKEN ?? "dev-token";
 const internalToken = process.env.INTERNAL_TOKEN;
@@ -12,12 +13,28 @@ const adminToken = process.env.NODE_RED_ADMIN_TOKEN;
 if (!adminToken || adminToken === token || adminToken === internalToken)
   throw new Error("A distinct NODE_RED_ADMIN_TOKEN is required");
 const nodeRedUrl = process.env.NODE_RED_URL ?? "http://node-red:1880";
+const workerUrl = process.env.WORKER_URL ?? "http://node-red:1881";
+const workerCall = async (path: string, body: unknown) => {
+  const response = await fetch(`${workerUrl}${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${internalToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok)
+    throw new Error(`Worker ${path} failed (${response.status})`);
+};
 const backend = new AgentsBackend(
-  httpExecutor(nodeRedUrl, internalToken),
+  async (payload) => workerCall("/start", payload),
   new NodeRedAdmin(nodeRedUrl, adminToken),
   new JsonStore(
     process.env.WORKFLOW_REGISTRY ?? "/workspace-data/workflows.json",
   ),
+  new Projects("/data/projects", "/data/agent-work"),
+  async (id) => workerCall("/stop", { runId: id }),
 );
 const internal = express();
 internal.use(express.json({ limit: "1mb" }));
@@ -45,6 +62,10 @@ internal.get("/inventory", (_request, response) => {
 internal.post("/finalize", (request, response) => {
   const result = backend.finalize(request.body);
   response.status(result.status).json(result.body);
+});
+internal.post("/worker-failed", (request, response) => {
+  backend.workerFailed(request.body.runId);
+  response.json({ acknowledged: true });
 });
 const privateServer = internal.listen(3095, "0.0.0.0");
 const admin = new NodeRedAdmin(nodeRedUrl, adminToken);

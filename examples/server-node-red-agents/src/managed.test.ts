@@ -76,6 +76,59 @@ function setup() {
 }
 
 describe("managed workflow boundary", () => {
+  it("dispatches the accepted tab snapshot even if the editor definition changes afterwards", async () => {
+    const tabs = new Map<string, Tab>();
+    const admin: Admin = {
+      get: async (id) => tabs.get(id) ?? null,
+      create: async (tab) => {
+        tabs.set("versioned", { ...tab, id: "versioned" });
+        return "versioned";
+      },
+      update: async (id, tab) => {
+        tabs.set(id, { ...tab, id });
+      },
+      delete: async (id) => {
+        tabs.delete(id);
+      },
+    };
+    let registry: Registry = {};
+    const store: Store = {
+      load: async () => registry,
+      save: async (next) => {
+        registry = next;
+      },
+    };
+    const payloads: { tab?: Tab; runId: string }[] = [];
+    const backend = new AgentsBackend(
+      async (payload) => {
+        payloads.push(payload);
+      },
+      admin,
+      store,
+    );
+    const app = createApp({
+      token: "test-token",
+      implementation: backend.implementation(),
+    });
+    const created = await request(app)
+      .post("/api/v1/workflows")
+      .set(auth)
+      .send(input("Original"));
+    expect(created.status).toBe(201);
+    const accepted = await request(app)
+      .post("/api/v1/runs")
+      .set(auth)
+      .send({
+        target: { kind: "workflow", workflowId: created.body.id },
+        input: { text: "Run" },
+      });
+    expect(accepted.status).toBe(202);
+    tabs.get("versioned")!.label = "Mutated after acceptance";
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].tab?.label).toBe("Original");
+    expect(payloads[0].runId).toBe(accepted.body.run.id);
+  });
   it("rejects unsupported graphs and private boundary overrides", () => {
     for (const specification of [
       "not deployable",

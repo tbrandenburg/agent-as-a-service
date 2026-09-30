@@ -22,7 +22,7 @@ ready() {
   local base="$1" attempt
   for ((attempt = 1; attempt <= 90; attempt++)); do
     if curl --max-time 2 --fail --silent "$base/api/v1/health" >/dev/null &&
-      compose exec -T node-red node -e "Promise.all([fetch('http://127.0.0.1:1880/ready'),fetch('http://api:3095/observations',{method:'POST'})]).then(([flow,callback]) => process.exit(flow.ok && callback.status === 401 ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then
+      compose exec -T node-red node -e "Promise.all([fetch('http://127.0.0.1:1880/flow/agents-tab',{headers:{authorization:'Bearer '+process.env.NODE_RED_ADMIN_TOKEN}}),fetch('http://api:3095/observations',{method:'POST'})]).then(([flow,callback]) => process.exit(flow.ok && callback.status === 401 ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
