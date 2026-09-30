@@ -10,6 +10,7 @@ This repository defines an engine-neutral REST contract for projects, conversati
 | `packages/agent-runtime/` | Optional server-side agent provider interfaces. |
 | `examples/server-express/` | Express server using the official ts-rest adapter; the default backend validates requests and returns 501 for unimplemented resource operations. `src/adapters/demo.ts` provides the in-memory demo backend. |
 | `examples/server-opencode/` | Dockerized in-memory Express contract backend that runs the fixed `opencode/big-pickle` CLI for conversation messages. |
+| `examples/server-node-red-agents/` | Node-RED-backed contract example: private worker per run, managed workflow tabs, project working directories, and agent conversations. |
 | `examples/client/` | Typed API client, usage example, and end-to-end demo. |
 | `scripts/` | Generate OpenAPI and the catalog/parity documents; validate the API and Archon route accounting. |
 | `docs/` | API catalog, design decisions, research, event semantics, and parity documentation. |
@@ -40,6 +41,16 @@ This repository defines an engine-neutral REST contract for projects, conversati
 The OpenCode Docker example exposes the complete contract. Conversation/message/run/event operations use an in-memory backend; other resource operations return typed `501`. HTTP routes require a runtime `API_TOKEN`; the fixed Big Pickle model does not require provider authentication. Restarting the backend loses conversation-to-OpenCode-session mappings, and the demo container is ephemeral. Port 3092 must be free for `make demo-opencode`.
 
 When changing the contract, run `make generate` before `make check` and include the regenerated artifacts. Keep provider-specific logic out of `packages/contract/`.
+
+## Node-RED adapter boundary (KISS / YAGNI)
+
+For `examples/server-node-red-agents/`, treat Node-RED as the workflow engine. The server maps HTTP resources to the existing Node-RED Admin API, process-scoped run workers, runtime hooks already in use, and the published agent lifecycle signal. It does not interpret or schedule arbitrary flow graphs itself. Core and managed workflows share the same execution path; managed workflow support is deliberately restricted to `managed-v1` rather than a promise to import any Node-RED graph.
+
+- Before adding plumbing, name the **specific contract behavior** that is missing, the Node-RED primitive that supplies it, and the smallest mapping between them. Use existing run events, native metrics/error logs, or a typed `501` for unsupported operations where that honestly satisfies the requirement. Do not add speculative observability, retry, storage, orchestration, or provider abstractions.
+- Keep run-wide facts on the run worker and node-specific facts at their actual source. Do not require user workflows or community nodes to carry adapter metadata or honor agent-only conventions such as `msg.cwd`. Node-RED receive/send activity is not proof of node success; report unconfirmed completion honestly.
+- Isolate an intermittent failure with existing logs, events, and a direct CLI reproduction before expanding the adapter. Changes to a published node's failure fields belong in `node-red-agents` when evidence points there; avoid parsing its private output or adding per-version knowledge to this server.
+- If a request cannot be met through a small mapping, **signal early** in the issue or PR: describe the missing Node-RED capability, the added lifecycle/state cost, and the smallest limited alternative. Agree on scope before building another callback protocol, worker host, tracing store, or general graph verifier. Keep manual E2E checks proportional to the behavior being changed.
+
 
 ## Lessons Learned
 
