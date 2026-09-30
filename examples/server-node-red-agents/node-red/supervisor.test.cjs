@@ -1,10 +1,69 @@
 const assert = require("node:assert/strict");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
+const { once } = require("node:events");
 const { mkdtemp, readdir } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
+const { Readable, PassThrough } = require("node:stream");
 const { test } = require("node:test");
-const { stop, start, workers, server } = require("./supervisor.js");
+const { stop, start, workers, server, forwardWorkerOutput } = require("./supervisor.js");
+const { addCoreProbes } = require("./core-probes.js");
+
+test("Core cwd proof preserves the writer instruction and rejects invalid cwd evidence", () => {
+  const tab = { configs: [], nodes: [{ id: "workflow-entry", wires: [["writer-agent"]] }] };
+  addCoreProbes(tab, "core");
+  const execute = (id, msg, errors = []) => {
+    const node = tab.nodes.find((node) => node.id === id);
+    return new Function("msg", "env", "node", node.func)(msg, { get: () => "/data/agent-work" }, { error: (error) => errors.push(error) });
+  };
+  const prompt = "In one sentence, draft a release note about A faster search index. Reply only with the sentence.";
+  const msg = { runId: "proof", text: "A faster search index", payload: prompt };
+  assert.deepEqual(tab.nodes[0].wires[0], ["aaas-probe-prompt"]);
+  execute("aaas-probe-prompt", msg);
+  msg.payload = "/data/agent-work\n";
+  execute("aaas-probe-check", msg);
+  assert.equal(msg.payload, msg.text);
+  msg.cwdListing = { directory: "/data/agent-work", files: [msg.filename] };
+  execute("aaas-probe-list-check", msg);
+  assert.equal(msg.payload, prompt);
+  assert.equal("aaasWriterPrompt" in msg, false);
+  const errors = [];
+  assert.equal(execute("aaas-probe-check", { payload: "/wrong\n" }, errors), null);
+  assert.equal(execute("aaas-probe-list-check", { cwdListing: { directory: "/wrong", files: [] } }, errors), null);
+  assert.equal(errors.length, 2);
+});
+
+test("native metrics require the opt-in switch and a run worker", () => {
+  for (const [worker, metrics, expected] of [
+    ["true", undefined, false],
+    ["true", "false", false],
+    ["true", "true", true],
+    ["false", "true", false],
+  ]) {
+    const result = spawnSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./settings.js').logging.console))"], {
+      cwd: __dirname,
+      encoding: "utf8",
+      env: { ...process.env, INTERNAL_TOKEN: "internal", NODE_RED_ADMIN_TOKEN: "admin", API_TOKEN: "public", WORKER_RUNTIME: worker, NODE_RED_WORKER_METRICS: metrics },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { level: "info", metrics: expected, audit: false });
+  }
+});
+
+test("worker output labels fragmented stdout and stderr lines without changing native fields", async () => {
+  const metric = '[metric] {"nodeid":"writer","event":"node.agent.receive","msgid":"message"}';
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  let out = "";
+  let err = "";
+  stdout.on("data", (chunk) => { out += chunk; });
+  stderr.on("data", (chunk) => { err += chunk; });
+  const lines = forwardWorkerOutput(Readable.from([metric.slice(0, 17), metric.slice(17) + "\r\nnext\npartial"]), stdout, "run-123");
+  const errors = forwardWorkerOutput(Readable.from(["failure", " detail\n"]), stderr, "run-123");
+  await Promise.all([once(lines, "close"), once(errors, "close")]);
+  assert.equal(out, `[worker runId=run-123] ${metric}\n[worker runId=run-123] next\n[worker runId=run-123] partial\n`);
+  assert.equal(err, "[worker runId=run-123] failure detail\n");
+});
 
 test("stop cleans already exited workers without waiting for a second exit event", async () => {
   const dir = await mkdtemp(join(tmpdir(), "aaas-stop-exited-"));

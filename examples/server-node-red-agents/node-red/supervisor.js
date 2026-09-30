@@ -1,9 +1,11 @@
 const http = require("node:http");
 const { spawn } = require("node:child_process");
+const { createInterface } = require("node:readline");
 const { mkdtemp, writeFile, rm, symlink, realpath, stat } = require("node:fs/promises");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { randomUUID } = require("node:crypto");
+const { addCoreProbes } = require("./core-probes.js");
 
 const workers = new Map();
 const starting = new Set();
@@ -30,6 +32,14 @@ async function waitForSlot(id) {
 const timeoutMs = Number(process.env.WORKER_TIMEOUT_MS || 450_000);
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 900_000) throw new Error("Invalid WORKER_TIMEOUT_MS");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function forwardWorkerOutput(input, output, id) {
+  return createInterface({ input, crlfDelay: Infinity }).on("line", (line) => {
+    if (!output.write(`[worker runId=${id}] ${line}\n`)) {
+      input.pause();
+      output.once("drain", () => input.resume());
+    }
+  });
+}
 function respond(response, code, body) { response.writeHead(code, { "content-type": "application/json" }); response.end(JSON.stringify(body)); }
 async function failed(id) {
   try {
@@ -102,18 +112,7 @@ async function launch(job) {
     const id = tab.id || randomUUID();
     for (const node of tab.nodes) node.z = id;
     if (tab.nodes.some((node) => ["inject", "cronplus", "trigger", "mqtt in", "tcp in", "websocket in"].includes(node.type))) throw new Error("Background trigger is not supported in worker");
-    if (job.path === "/workflow/agents") {
-      const entry = [...tab.nodes, ...tab.configs].find((node) => node.id === "workflow-entry");
-      if (!entry) throw new Error("Core entry missing");
-      entry.wires[0] = ["aaas-probe-exec"];
-      tab.nodes.push(
-        { id: "aaas-probe-exec", z: id, type: "exec", name: "Process-relative Exec", command: "pwd", addpay: false, append: "", useSpawn: "false", wires: [["aaas-probe-check"], [], []] },
-        { id: "aaas-probe-check", z: id, type: "function", name: "Check process cwd", func: "if (msg.payload.trim() !== env.get('WORKER_CWD')) { node.error('Exec cwd differs from worker cwd'); return null; } msg.filename='aaas-cwd-proof-'+msg.runId+'.txt'; msg.payload=msg.text; return msg;", outputs: 1, wires: [["aaas-probe-file"]] },
-        { id: "aaas-probe-file", z: id, type: "file", name: "Relative core File", filename: "filename", filenameType: "msg", appendNewline: false, overwriteFile: "true", createDir: false, encoding: "none", wires: [["aaas-probe-list"]] },
-        { id: "aaas-probe-list", z: id, type: "cwd-list-example", name: "Process-relative JS listing", wires: [["aaas-probe-list-check"]] },
-        { id: "aaas-probe-list-check", z: id, type: "function", name: "Check JS listing", func: "if (msg.cwdListing?.directory !== env.get('WORKER_CWD') || !msg.cwdListing?.files?.includes(msg.filename)) { node.error('Process-relative JavaScript listing missed File output'); return null; } msg.payload=msg.text; return msg;", outputs: 1, wires: [["writer-agent"]] },
-      );
-    }
+    if (job.path === "/workflow/agents") addCoreProbes(tab, id);
     const flow = [{ id, type: "tab", label: tab.label }, ...tab.configs, ...tab.nodes,
       { id: "aaas-worker-ready-in", z: id, type: "http in", url: "/ready", method: "get", wires: [["aaas-worker-ready-body"]] },
       { id: "aaas-worker-ready-body", z: id, type: "function", func: "msg.payload={ready:true};return msg;", outputs: 1, wires: [["aaas-worker-ready-response"]] },
@@ -127,7 +126,9 @@ async function launch(job) {
       socket.once("error", reject);
       socket.listen(0, "127.0.0.1", () => { const chosen = socket.address().port; socket.close(() => resolve(chosen)); });
     });
-    const child = spawn("node", ["/seed/worker-host.js", dir, String(port), job.runId], { cwd, stdio: "inherit", detached: true, env: { ...process.env, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
+    const child = spawn("node", ["/seed/worker-host.js", dir, String(port), job.runId], { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true, env: { ...process.env, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
+    forwardWorkerOutput(child.stdout, process.stdout, job.runId);
+    forwardWorkerOutput(child.stderr, process.stderr, job.runId);
     const worker = { child, dir, port, group: child.pid, exited: false, exit: null, timeout: null };
     worker.exit = new Promise((resolve) => {
       const settled = () => { worker.exited = true; resolve(); if (workers.has(job.runId)) void failed(job.runId).finally(() => stop(job.runId)); };
@@ -179,4 +180,4 @@ async function read(request) {
   return JSON.parse(Buffer.concat(parts).toString("utf8"));
 }
 if (require.main === module) process.on("SIGTERM", () => { for (const id of workers.keys()) void stop(id); });
-module.exports = { stop, start, workers, server };
+module.exports = { stop, start, workers, server, forwardWorkerOutput };

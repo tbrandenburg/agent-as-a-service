@@ -58,6 +58,7 @@ if [[ "$action" == demo ]]; then
   export API_TOKEN="${API_TOKEN:-dev-token}" INTERNAL_TOKEN="${INTERNAL_TOKEN:-internal-observer-demo-token}" NODE_RED_ADMIN_TOKEN="${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}"
   credentials
   check_demo_space
+  mkdir -p "$root/.home"
   cleanup_demo() {
     local status=$? image present
     trap - EXIT
@@ -86,8 +87,30 @@ if [[ "$action" == demo ]]; then
   exit
 fi
 
+if [[ "$action" == spawn ]]; then
+  for ((attempt = 1; attempt <= 5; attempt++)); do
+    uuid="$(< /proc/sys/kernel/random/uuid)"
+    instance="aaas-${uuid:0:8}"
+    if [[ ! "$instance" =~ ^[a-z][a-z0-9-]{0,39}$ ]]; then
+      printf 'Could not generate a valid instance name\n' >&2
+      exit 1
+    fi
+    project="aas-node-red-agents-$instance"
+    containers="$(docker container ls --all --quiet --filter "label=com.docker.compose.project=$project")"
+    volumes="$(docker volume ls --quiet --filter "label=com.docker.compose.project=$project")"
+    networks="$(docker network ls --quiet --filter "label=com.docker.compose.project=$project")"
+    if [[ -z "$containers" && -z "$volumes" && -z "$networks" ]]; then
+      INSTANCE="$instance" bash "$0" start
+      printf 'Cleanup: make cleanup-node-red-agents INSTANCE=%s\n' "$instance"
+      exit
+    fi
+  done
+  printf 'Could not generate an unused instance name after 5 attempts\n' >&2
+  exit 1
+fi
+
 if [[ ! "$action" =~ ^(start|status|logs|stop|cleanup)$ ]]; then
-  printf 'Usage: %s {start|status|logs|stop|cleanup|demo} (named actions require INSTANCE)\n' "$0" >&2
+  printf 'Usage: %s {spawn|start|status|logs|stop|cleanup|demo} (named actions require INSTANCE)\n' "$0" >&2
   exit 2
 fi
 
@@ -104,6 +127,7 @@ case "$action" in
     : "${INTERNAL_TOKEN:?Set INTERNAL_TOKEN for this named instance}"
     : "${NODE_RED_ADMIN_TOKEN:?Set NODE_RED_ADMIN_TOKEN for this named instance}"
     credentials
+    mkdir -p "$root/.home"
     if [[ -n "$(compose ps --all --quiet)" ]]; then
       printf 'Instance %s already exists. Use status or stop first.\n' "$instance" >&2
       bash "$0" status
