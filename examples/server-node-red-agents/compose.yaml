@@ -9,8 +9,11 @@ services:
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
       NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
       NODE_RED_URL: http://node-red:1880
+      WORKER_URL: http://node-red:1881
     volumes:
       - api-data:/workspace-data
+      - projects:/data/projects
+      - global-work:/data/agent-work
     ports:
       - target: 3094
         host_ip: 127.0.0.1
@@ -22,9 +25,10 @@ services:
       API_TOKEN: ${API_TOKEN:-dev-token}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
       NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
-      CONTROLLED_FIXTURE: ${CONTROLLED_FIXTURE:-false}
     volumes:
       - node-red-data:/data
+      - projects:/data/projects
+      - global-work:/data/agent-work
     depends_on:
       api:
         condition: service_started
@@ -32,3 +36,5 @@ services:
 volumes:
   api-data:
   node-red-data:
+  projects:
+  global-work:

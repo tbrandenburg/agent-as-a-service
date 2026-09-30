@@ -117,8 +117,6 @@ export function tabFor(input: Input, marker: string = randomUUID()): Tab {
     invocation: "prompt",
     model: "opencode/big-pickle",
     modelType: "str",
-    cwd: "/data/agent-work",
-    cwdType: "str",
     prompt: "payload",
     promptType: "msg",
     timeout: "",

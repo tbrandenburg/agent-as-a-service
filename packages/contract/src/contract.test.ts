@@ -47,6 +47,52 @@ describe("REST specification", () => {
       }).success,
     ).toBe(true);
   });
+  it("validates compatible provisioning and rename", () => {
+    const input = contract.projects.createProject.body;
+    for (const value of [
+      {},
+      { repositoryUrl: "https://github.com/example/repo" },
+      {
+        localPath: "/data/projects/old",
+        repositoryUrl: "https://github.com/example/repo",
+      },
+      { provisioning: { kind: "empty" }, folderName: "custom-folder" },
+      {
+        provisioning: {
+          kind: "clone",
+          repositoryUrl: "https://github.com/example/repo",
+        },
+        folderName: "other-folder",
+      },
+      { provisioning: { kind: "existing", localPath: "/data/projects/old" } },
+    ])
+      expect(input.safeParse(value).success).toBe(true);
+    for (const value of [
+      { folderName: "../escape" },
+      { folderName: ".." },
+      {
+        provisioning: { kind: "existing", localPath: "/tmp" },
+        folderName: "unused",
+      },
+      { provisioning: { kind: "empty" }, localPath: "/tmp" },
+      {
+        provisioning: {
+          kind: "clone",
+          repositoryUrl: "https://github.com/example/repo",
+        },
+        repositoryUrl: "https://github.com/other/repo",
+      },
+    ])
+      expect(input.safeParse(value).success).toBe(false);
+    expect(contract.projects.updateProject.method).toBe("PATCH");
+    expect(
+      contract.projects.updateProject.body.safeParse({ name: "Renamed" })
+        .success,
+    ).toBe(true);
+    expect(
+      contract.projects.updateProject.body.safeParse({ name: " " }).success,
+    ).toBe(false);
+  });
   it("validates only the workflow envelope, leaving specifications to their engines", () => {
     expect(
       definition.safeParse({
@@ -390,6 +436,6 @@ describe("REST specification", () => {
       }
     };
     walk(contract as unknown as Record<string, unknown>);
-    expect(count).toBe(33);
+    expect(count).toBe(34);
   });
 });

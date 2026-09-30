@@ -19,6 +19,7 @@ All operations are specified in the independent ts-rest contract under `/api/v1`
 | GET | `/api/v1/projects` | `listProjects` | 200 | 501 |
 | POST | `/api/v1/projects` | `createProject` | 201 | 501 |
 | GET | `/api/v1/projects/{projectId}` | `getProject` | 200 | 501 |
+| PATCH | `/api/v1/projects/{projectId}` | `updateProject` | 200 | 501 |
 | DELETE | `/api/v1/projects/{projectId}` | `deleteProject` | 200 | 501 |
 | GET | `/api/v1/runs` | `listRuns` | 200 | 501 |
 | POST | `/api/v1/runs` | `startRun` | 202 | 501 |

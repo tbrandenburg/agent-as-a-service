@@ -1,0 +1,10 @@
+{
+  "name": "node-red-contrib-cwd-list-example",
+  "version": "1.0.0",
+  "private": true,
+  "node-red": {
+    "nodes": {
+      "cwd-list": "cwd-list.js"
+    }
+  }
+}

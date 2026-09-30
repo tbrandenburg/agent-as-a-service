@@ -11,8 +11,8 @@ if (!("components" in spec)) throw new Error("OpenAPI 3 components required");
 const operations = Object.values(spec.paths ?? {})
   .flatMap((path) => Object.values(path ?? {}))
   .filter((x) => x && typeof x === "object" && "responses" in x);
-if (operations.length !== 33)
-  throw new Error(`Expected 33 operations, got ${operations.length}`);
+if (operations.length !== 34)
+  throw new Error(`Expected 34 operations, got ${operations.length}`);
 if (JSON.stringify(spec.security) !== JSON.stringify([{ bearerAuth: [] }]))
   throw new Error("Resource operations must require bearer authentication");
 const creationBody = spec.paths?.["/api/v1/projects"]?.post?.requestBody;

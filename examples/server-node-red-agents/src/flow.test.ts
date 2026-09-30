@@ -40,6 +40,7 @@ describe("deployed flow boundary", () => {
     ]);
     expect(node("writer-agent").concurrency).toBeGreaterThan(1);
     const [writer, reviewer, response] = invoke("workflow-entry", {
+      req: { headers: { authorization: "Bearer internal-test-token" } },
       payload: { runId: "r1", text: "input", arbitrary: "secret" },
     }) as Record<string, unknown>[];
     expect(response.statusCode).toBe(202);

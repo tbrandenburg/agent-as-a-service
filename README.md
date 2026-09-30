@@ -12,14 +12,14 @@ Use it as a typed API specification when building an agent backend or client. Th
 
 | Resource | Operations | Contract |
 | --- | ---: | --- |
-| Projects | 4 | [projects.ts](packages/contract/src/v1/projects.ts) |
+| Projects | 5 | [projects.ts](packages/contract/src/v1/projects.ts) |
 | Conversations and messages | 8 | [conversations.ts](packages/contract/src/v1/conversations.ts) |
 | Workflows | 6 | [workflows.ts](packages/contract/src/v1/workflows.ts) |
 | Runs, events, and artifacts | 10 | [runs.ts](packages/contract/src/v1/runs.ts) |
 | Human interactions | 2 | [interactions.ts](packages/contract/src/v1/interactions.ts) |
 | Health, status, and OpenAPI | 3 | [system.ts](packages/contract/src/v1/system.ts) |
 
-That is **30 resource operations and 3 service operations**. The contract also specifies:
+That is **31 resource operations and 3 service operations**. The contract also specifies:
 
 - Typed requests, responses, and errors with ts-rest and Zod.
 - Run acceptance that makes the returned run immediately readable.
@@ -48,7 +48,7 @@ make demo-express
 
 `API_TOKEN=dev-token make demo-node-red` builds two Docker containers, waits for the private Node-RED flow to load, and walks through the unchanged authenticated workflow/run contract at `http://127.0.0.1:3093`. Node-RED stays private; the host needs Docker Compose, curl, Node/npm, Make, and `ss`, but no Node-RED installation. See [`examples/server-node-red/README.md`](examples/server-node-red/README.md).
 
-`make demo-node-red-agents` runs the Dockerized, real `opencode/big-pickle` agent workflows on a disposable Compose project with a Docker-assigned loopback API port and no provider credentials. It exercises managed workflow creation, execution, updating and deletion. Named instances can run concurrently via `make start-node-red-agents INSTANCE=alpha` with distinct `API_TOKEN`, `INTERNAL_TOKEN` and `NODE_RED_ADMIN_TOKEN`; use `make status-node-red-agents INSTANCE=alpha` to find its current URL. See [`examples/server-node-red-agents/README.md`](examples/server-node-red-agents/README.md) for the lifecycle, credentials and persistence instructions.
+`make demo-node-red-agents` runs Dockerized, real `opencode/big-pickle` agent workflows on a disposable Compose project with a Docker-assigned loopback API port and no provider credentials. This example provisions projects (empty, clone or register existing), allows display-name-only renames, and executes each direct-agent or workflow run in a separate Node-RED process whose OS cwd is chosen only by explicit `run.projectId` (or the global default when omitted). Same-project runs may overlap. Named instances can run concurrently via `make start-node-red-agents INSTANCE=alpha` with distinct `API_TOKEN`, `INTERNAL_TOKEN` and `NODE_RED_ADMIN_TOKEN`; use `make status-node-red-agents INSTANCE=alpha` to find its current URL. See [`examples/server-node-red-agents/README.md`](examples/server-node-red-agents/README.md) for project modes, lifecycle, credentials and persistence instructions.
 
 To start the default example server instead:
 
