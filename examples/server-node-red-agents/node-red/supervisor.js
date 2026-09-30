@@ -6,7 +6,27 @@ const { tmpdir } = require("node:os");
 const { randomUUID } = require("node:crypto");
 
 const workers = new Map();
-const max = 4;
+const starting = new Set();
+const waiting = new Set();
+const max = Number(process.env.MAX_WORKERS ?? "4");
+if (!Number.isSafeInteger(max) || max < 1 || max > 32) throw new Error("Invalid MAX_WORKERS");
+const capacityWaitMs = 20_000;
+const released = new Set();
+function notifyRelease() { for (const wake of released) wake(); released.clear(); }
+async function waitForSlot(id) {
+  const deadline = Date.now() + capacityWaitMs;
+  while (workers.size + starting.size >= max) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("Worker capacity wait timed out");
+    await new Promise((resolve) => {
+      const wake = () => { clearTimeout(timer); released.delete(wake); resolve(); };
+      const timer = setTimeout(wake, remaining);
+      released.add(wake);
+    });
+  }
+  // Reserve synchronously before another awakened waiter can inspect capacity.
+  starting.add(id);
+}
 const timeoutMs = Number(process.env.WORKER_TIMEOUT_MS || 450_000);
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 900_000) throw new Error("Invalid WORKER_TIMEOUT_MS");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,16 +46,36 @@ async function failed(id) {
 async function stop(id) {
   const worker = workers.get(id);
   if (!worker) return;
-  workers.delete(id);
+  if (worker.stopping) return worker.stopping;
+  worker.stopping = cleanup(id, worker).catch((error) => {
+    worker.stopping = null;
+    throw error;
+  });
+  return worker.stopping;
+}
+async function cleanup(id, worker) {
   clearTimeout(worker.timeout);
   if (!worker.exited && worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill("SIGTERM");
   await Promise.race([worker.exit, sleep(5000)]);
   if (!worker.exited && worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill("SIGKILL");
-  await Promise.race([worker.exit, sleep(5000)]);
+  await worker.exit;
   await rm(worker.dir, { recursive: true, force: true });
+  workers.delete(id);
+  notifyRelease();
 }
-async function start(job) {
-  if (workers.has(job.runId) || workers.size >= max) throw new Error("Execution worker limit reached");
+async function start(job, launchWorker = launch) {
+  const id = job.runId;
+  if (typeof id !== "string" || !id || workers.has(id) || starting.has(id) || waiting.has(id)) throw new Error("Duplicate or invalid execution worker");
+  waiting.add(id);
+  try {
+    await waitForSlot(id);
+    await launchWorker(job);
+  } finally {
+    waiting.delete(id);
+    if (starting.delete(id)) notifyRelease();
+  }
+}
+async function launch(job) {
   const root = await realpath("/data/projects");
   const global = await realpath("/data/agent-work");
   const cwd = await realpath(job.cwd);
@@ -82,6 +122,7 @@ async function start(job) {
     });
     worker.timeout = setTimeout(() => { void failed(job.runId).finally(() => stop(job.runId)); }, timeoutMs);
     workers.set(job.runId, worker);
+    starting.delete(job.runId);
     for (let attempt = 0; attempt < 150; attempt++) {
       if (worker.exited) throw new Error("Worker exited before ready");
       try {
@@ -113,7 +154,7 @@ const server = http.createServer(async (request, response) => {
       return respond(response, 202, { accepted: true });
     }
     respond(response, 404, { error: "Not found" });
-  } catch (error) { console.error("Worker failed", error instanceof Error ? error.message : "unknown"); respond(response, 503, { error: "Worker unavailable" }); }
+  } catch (error) { console.error("Worker failed", error instanceof Error ? error.message : "unknown"); respond(response, error instanceof Error && error.message === "Worker capacity wait timed out" ? 429 : 503, { error: "Worker unavailable" }); }
 });
 if (require.main === module) server.listen(1881, "0.0.0.0");
 async function read(request) {
@@ -122,4 +163,4 @@ async function read(request) {
   return JSON.parse(Buffer.concat(parts).toString("utf8"));
 }
 if (require.main === module) process.on("SIGTERM", () => { for (const id of workers.keys()) void stop(id); });
-module.exports = { stop, workers, server };
+module.exports = { stop, start, workers, server };

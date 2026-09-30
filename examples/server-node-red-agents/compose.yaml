@@ -10,6 +10,7 @@ services:
       NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
       NODE_RED_URL: http://node-red:1880
       WORKER_URL: http://node-red:1881
+      MAX_WORKERS: ${MAX_WORKERS:-4}
     volumes:
       - api-data:/workspace-data
       - projects:/data/projects
@@ -25,6 +26,7 @@ services:
       API_TOKEN: ${API_TOKEN:-dev-token}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
       NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
+      MAX_WORKERS: ${MAX_WORKERS:-4}
     volumes:
       - node-red-data:/data
       - projects:/data/projects

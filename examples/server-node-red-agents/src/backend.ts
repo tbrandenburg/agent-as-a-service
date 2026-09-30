@@ -65,6 +65,8 @@ export type Executor = (payload: {
   sessionID?: string;
 }) => Promise<void>;
 
+export class WorkerCapacityError extends Error {}
+
 const workflow: z.infer<typeof schemas.definition> = {
   id: "node-red-demo",
   name: "Core",
@@ -226,6 +228,7 @@ export class AgentsBackend {
     private readonly store?: Store,
     private readonly projects?: Projects,
     private readonly stopWorker?: (id: string) => Promise<void>,
+    private readonly maxWorkers = 4,
   ) {}
 
   async initialize(): Promise<void> {
@@ -826,12 +829,18 @@ export class AgentsBackend {
         sessionID,
       });
       // A start can arrive before the dispatch response.
-    } catch {
+    } catch (error) {
       if (job.run.status === "running")
         this.update(job.run, "failed", {
           error: {
-            code: "dispatch_failed",
-            message: "The workflow could not be dispatched",
+            code:
+              error instanceof WorkerCapacityError
+                ? "worker_capacity_timeout"
+                : "dispatch_failed",
+            message:
+              error instanceof WorkerCapacityError
+                ? "Execution worker capacity did not become available"
+                : "The workflow could not be dispatched",
           },
         });
     }
@@ -1002,12 +1011,12 @@ export class AgentsBackend {
             if (
               [...this.jobs.values()].filter(({ run }) =>
                 ["queued", "running", "paused"].includes(run.status),
-              ).length >= 4
+              ).length >= this.maxWorkers
             )
               return errorResponse(
                 503,
                 "workers_busy",
-                "Maximum of four concurrent execution workers reached",
+                "Maximum concurrent execution workers reached",
               );
             if (
               body.target.kind === "agent" &&

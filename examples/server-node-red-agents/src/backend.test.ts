@@ -72,6 +72,58 @@ const run = async (app: ReturnType<typeof setup>["app"], text?: string) => {
 };
 
 describe("Node-RED lifecycle boundary", () => {
+  it("rejects active capacity before 202 but accepts turnover at configured capacity", async () => {
+    let releaseStop!: () => void;
+    const stopped = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const dispatched: string[] = [];
+    let occupied = false;
+    const backend = new AgentsBackend(
+      async ({ runId }) => {
+        if (occupied) await stopped;
+        occupied = true;
+        dispatched.push(runId);
+      },
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        await stopped;
+        occupied = false;
+      },
+      1,
+    );
+    const app = createApp({
+      token: "test-token",
+      implementation: backend.implementation(),
+    });
+    const first = await run(app);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(dispatched).toEqual([first]);
+    const busy = await request(app)
+      .post("/api/v1/runs")
+      .set(auth)
+      .send(start());
+    expect(busy.status).toBe(503);
+    expect(busy.body.error.code).toBe("workers_busy");
+    const observation = started(first);
+    expect(backend.observe(observation).status).toBe(200);
+    expect(backend.observe(terminal(observation)).status).toBe(200);
+    expect(backend.finalize(done(first)).status).toBe(200);
+    const replacement = await run(app);
+    expect(
+      (await request(app).get(`/api/v1/runs/${replacement}`).set(auth)).body.run
+        .status,
+    ).toBe("running");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(dispatched).toEqual([first]);
+    releaseStop();
+    await stopped;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(dispatched).toEqual([first, replacement]);
+    expect(backend.runs.get(replacement)?.run.status).toBe("running");
+  });
   it("accepts without waiting, discovers conversations at start, and replays complete run snapshots", async () => {
     let resolve!: () => void;
     const { backend, app } = setup(
