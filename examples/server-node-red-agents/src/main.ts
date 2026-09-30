@@ -1,7 +1,7 @@
 import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { createApp } from "../../server-express/src/index.js";
-import { AgentsBackend } from "./backend.js";
+import { AgentsBackend, WorkerCapacityError } from "./backend.js";
 import { JsonStore, NodeRedAdmin } from "./admin.js";
 import { Projects } from "./projects.js";
 
@@ -14,6 +14,9 @@ if (!adminToken || adminToken === token || adminToken === internalToken)
   throw new Error("A distinct NODE_RED_ADMIN_TOKEN is required");
 const nodeRedUrl = process.env.NODE_RED_URL ?? "http://node-red:1880";
 const workerUrl = process.env.WORKER_URL ?? "http://node-red:1881";
+const maxWorkers = Number(process.env.MAX_WORKERS ?? "4");
+if (!Number.isSafeInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 32)
+  throw new Error("Invalid MAX_WORKERS");
 const workerCall = async (path: string, body: unknown) => {
   const response = await fetch(`${workerUrl}${path}`, {
     method: "POST",
@@ -25,7 +28,9 @@ const workerCall = async (path: string, body: unknown) => {
     signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok)
-    throw new Error(`Worker ${path} failed (${response.status})`);
+    throw response.status === 429
+      ? new WorkerCapacityError("Worker capacity wait timed out")
+      : new Error(`Worker ${path} failed (${response.status})`);
 };
 const backend = new AgentsBackend(
   async (payload) => workerCall("/start", payload),
@@ -35,6 +40,7 @@ const backend = new AgentsBackend(
   ),
   new Projects("/data/projects", "/data/agent-work"),
   async (id) => workerCall("/stop", { runId: id }),
+  maxWorkers,
 );
 const internal = express();
 internal.use(express.json({ limit: "1mb" }));
