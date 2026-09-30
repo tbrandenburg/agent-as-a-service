@@ -9,6 +9,8 @@ type FlowNode = {
   func?: string;
   wires: string[][];
   concurrency?: number;
+  model?: string;
+  modelType?: string;
 };
 const nodes = JSON.parse(
   readFileSync(
@@ -32,6 +34,13 @@ const invoke = (id: string, message: Record<string, unknown>) =>
   ) as Record<string, unknown> | (Record<string, unknown> | null)[] | null;
 
 describe("deployed flow boundary", () => {
+  it("resolves the operator model for both Core agents", () => {
+    for (const id of ["writer-agent", "reviewer-agent"])
+      expect(node(id)).toMatchObject({
+        model: "DEFAULT_MODEL",
+        modelType: "env",
+      });
+  });
   it("dispatches before agents and propagates correlation through parallel join and repeated node", () => {
     expect(node("workflow-entry").wires).toEqual([
       ["writer-agent"],

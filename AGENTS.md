@@ -52,6 +52,8 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-09-30: Pitfall: A filesystem proof chain replaced the agent task prompt with its bare topic, provoking tool searches and empty-output failures. Prevention rule/countermeasure: Preserve and restore task payloads across probes; regression-test the exact prompt reaching the agent.
+- 2026-09-30: Pitfall: A direct authenticated CLI run passed while real workflows intermittently failed with agent exit code 0. Prevention rule/countermeasure: Require fresh Core and managed E2E and correlate terminal events with worker metrics before declaring model switching validated.
 - 2026-09-30: Pitfall: Killing a worker host left its spawned model CLI running after worker cleanup. Prevention rule/countermeasure: launch each worker in an isolated process group and terminate the group on shutdown or crash.
 - 2026-09-30: Pitfall: A provider session resumed successfully in its original directory but stalled when resumed from another project directory. Prevention rule/countermeasure: verify cross-directory resume with the real CLI and reject unsupported directory changes before accepting the run.
 - 2026-09-29: Pitfall: Parallel Compose demos exhausted host storage after many project-scoped image builds, causing misleading readiness failures. Prevention rule/countermeasure: Check disk capacity before concurrent Docker E2E and remove only session-owned test images after teardown.

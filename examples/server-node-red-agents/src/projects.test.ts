@@ -6,6 +6,7 @@ import request from "supertest";
 import { createApp } from "../../server-express/src/index.js";
 import { AgentsBackend } from "./backend.js";
 import { Projects } from "./projects.js";
+import type { Tab } from "./managed.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -16,7 +17,7 @@ async function setup() {
   const root = await mkdtemp(join(tmpdir(), "aaas-project-test-"));
   roots.push(root);
   const projects = new Projects(join(root, "projects"), join(root, "global"));
-  const calls: { runId: string; cwd?: string }[] = [];
+  const calls: { runId: string; cwd?: string; tab?: Tab }[] = [];
   const backend = new AgentsBackend(
     async (payload) => {
       calls.push(payload);
@@ -161,6 +162,14 @@ describe("project directory registry and run acceptance", () => {
       created.body.localPath,
       projects.global,
     ]);
+    for (const call of calls) {
+      expect(
+        call.tab?.nodes.find((node) => node.id === "writer-agent"),
+      ).toMatchObject({
+        model: "DEFAULT_MODEL",
+        modelType: "env",
+      });
+    }
     expect(
       (await request(app).delete(`/api/v1/projects/${id}`).set(auth)).status,
     ).toBe(409);

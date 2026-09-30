@@ -67,6 +67,24 @@ const invalid = async (body: unknown, status: number) => {
   );
 };
 
+try {
+  inspect("test", ["-d", "/data/projects/existing-fixture"]);
+} catch (error) {
+  if (
+    error instanceof Error &&
+    "status" in error &&
+    error.status === 1 &&
+    "stderr" in error &&
+    !String(error.stderr).trim()
+  ) {
+    throw new Error(
+      `Missing /data/projects/existing-fixture in Compose project ${compose}. Create it with: docker compose -p ${compose} -f examples/server-node-red-agents/compose.yaml exec -T node-red mkdir -p /data/projects/existing-fixture`,
+      { cause: error },
+    );
+  }
+  throw error;
+}
+
 const empty = await create({
   name: "first",
   folderName: "chosen-empty",

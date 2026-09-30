@@ -184,6 +184,13 @@ describe("managed workflow boundary", () => {
     const id = created.body.id as string;
     expect(id).toBe("assigned-id");
     expect(tabs.has(id)).toBe(true);
+    const managedAgent = tabs
+      .get(id)
+      ?.nodes.find((node) => node.type === "agent");
+    expect(managedAgent).toMatchObject({
+      model: "DEFAULT_MODEL",
+      modelType: "env",
+    });
     expect(
       (await request(app).get(`/api/v1/workflows/${id}`).set(auth)).headers
         .etag,

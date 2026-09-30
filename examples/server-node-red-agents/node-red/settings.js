@@ -8,6 +8,13 @@ module.exports = {
   flowFile: "flows.json",
   httpNodeRoot: process.env.WORKER_RUNTIME === "true" ? "/" : false,
   fileWorkingDirectory: "/data/agent-work",
+  logging: {
+    console: {
+      level: "info",
+      metrics: process.env.WORKER_RUNTIME === "true" && process.env.NODE_RED_WORKER_METRICS === "true",
+      audit: false,
+    },
+  },
   adminAuth: {
     type: "credentials",
     users: [],

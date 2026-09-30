@@ -23,14 +23,17 @@ services:
       context: ../..
       dockerfile: examples/server-node-red-agents/node-red/Dockerfile
     environment:
+      DEFAULT_MODEL: ${DEFAULT_MODEL-opencode/big-pickle}
       API_TOKEN: ${API_TOKEN:-dev-token}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
       NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}
       MAX_WORKERS: ${MAX_WORKERS:-4}
+      NODE_RED_WORKER_METRICS: ${NODE_RED_WORKER_METRICS:-false}
     volumes:
       - node-red-data:/data
       - projects:/data/projects
       - global-work:/data/agent-work
+      - ../../.home:/home-seed:ro
     depends_on:
       api:
         condition: service_started
