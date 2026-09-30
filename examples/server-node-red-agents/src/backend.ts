@@ -14,6 +14,7 @@ type Conversation = z.infer<typeof schemas.conversation>;
 type Message = z.infer<typeof schemas.message>;
 type Run = z.infer<typeof schemas.run>;
 type Detail = z.infer<typeof schemas.runDetail>;
+type NodeExecution = z.infer<typeof schemas.execution>;
 type Event = z.infer<typeof schemas.event>;
 type ConversationEvent = z.infer<typeof schemas.conversationEvent>;
 type Observation = {
@@ -51,6 +52,10 @@ type Job = {
   cwd?: string;
   executions: Map<string, Execution>;
   failed: boolean;
+  nodeSequence: number;
+  nodeBatches: Map<number, string>;
+  nodeExecutions: Map<string, NodeExecution>;
+  nodeDrained: boolean;
 };
 type Result = {
   status: number;
@@ -485,6 +490,134 @@ export class AgentsBackend {
     this.event(run, "run.updated", { status });
   }
 
+  /** Bounded, ordered private worker callback; a retry must replay exactly the same batch. */
+  observeNodes(value: unknown): Result {
+    if (
+      !record(value) ||
+      !text(value.runId) ||
+      !Array.isArray(value.observations) ||
+      value.observations.length < 1 ||
+      value.observations.length > 32
+    )
+      return reject("Invalid node observation batch", 400);
+    const job = this.jobs.get(value.runId);
+    if (!job) return reject("Unknown run");
+    const observations = value.observations;
+    let next = job.nodeSequence;
+    const pending = new Map(job.nodeExecutions);
+    for (const item of observations) {
+      if (
+        !record(item) ||
+        Object.keys(item).some(
+          (key) =>
+            !["sequence", "type", "nodeId", "executionId", "status"].includes(
+              key,
+            ),
+        ) ||
+        typeof item.sequence !== "number" ||
+        !Number.isSafeInteger(item.sequence) ||
+        item.sequence < 1 ||
+        item.sequence > 4096 ||
+        !text(item.nodeId) ||
+        item.nodeId.length > 256 ||
+        !["received", "completed", "sent"].includes(String(item.type)) ||
+        (item.type !== "sent" &&
+          (!text(item.executionId) || item.executionId.length > 128)) ||
+        (item.type === "sent" && item.executionId !== undefined)
+      )
+        return reject("Invalid node observation", 400);
+      const body = canonical(item);
+      const sequence = item.sequence as number;
+      if (sequence <= next) {
+        if (job.nodeBatches.get(item.sequence as number) !== body)
+          return reject("Conflicting node observation");
+        continue;
+      }
+      if (
+        job.nodeDrained ||
+        !["running", "completed", "failed"].includes(job.run.status) ||
+        sequence !== next + 1
+      )
+        return reject("Node observation out of order");
+      const id = item.executionId as string;
+      if (item.type === "received") {
+        if (item.status !== "running" || pending.has(id))
+          return reject("Invalid node receive");
+        pending.set(id, {
+          id,
+          runId: value.runId,
+          key: item.nodeId as string,
+          status: "running",
+        });
+      } else if (item.type === "completed") {
+        const execution = pending.get(id);
+        if (
+          !execution ||
+          execution.key !== item.nodeId ||
+          execution.status !== "running" ||
+          !["completed", "failed"].includes(String(item.status))
+        )
+          return reject("Invalid node completion");
+        pending.set(id, {
+          ...execution,
+          status: item.status as "completed" | "failed",
+        });
+      } else if (item.status !== undefined) return reject("Invalid node send");
+      next++;
+    }
+    for (const item of observations)
+      if (item.sequence > job.nodeSequence) {
+        job.nodeBatches.set(item.sequence as number, canonical(item));
+        if (item.type !== "sent")
+          this.event(
+            job.run,
+            `node.${item.type}`,
+            { nodeId: item.nodeId, status: item.status },
+            item.executionId as string,
+          );
+        else this.event(job.run, "node.sent", { nodeId: item.nodeId });
+      }
+    job.nodeSequence = next;
+    job.nodeExecutions = pending;
+    this.runs.get(value.runId)!.executions = [...pending.values()];
+    return { status: 200, body: { acknowledged: true } };
+  }
+
+  private closeNodes(job: Job, reason?: string) {
+    if (job.nodeDrained) return;
+    job.nodeDrained = true;
+    for (const execution of job.nodeExecutions.values()) {
+      if (execution.status !== "running") continue;
+      execution.status = "unconfirmed";
+      this.event(
+        job.run,
+        "node.unconfirmed",
+        { nodeId: execution.key },
+        execution.id,
+      );
+    }
+    if (reason) this.event(job.run, "observation.incomplete", { reason });
+  }
+
+  drainNodes(value: unknown): Result {
+    if (
+      !record(value) ||
+      !text(value.runId) ||
+      (value.incomplete !== undefined &&
+        ![
+          "queue_overflow",
+          "callback_failed",
+          "drain_timeout",
+          "ambiguous_identity",
+        ].includes(String(value.incomplete)))
+    )
+      return reject("Invalid node drain", 400);
+    const job = this.jobs.get(value.runId);
+    if (!job) return reject("Unknown run");
+    this.closeNodes(job, value.incomplete as string | undefined);
+    return { status: 200, body: { acknowledged: true } };
+  }
+
   private conversationEvent(
     id: string,
     run: Run,
@@ -792,6 +925,7 @@ export class AgentsBackend {
 
   workerFailed(id: string) {
     const job = this.jobs.get(id);
+    if (job && !job.nodeDrained) this.closeNodes(job, "worker_failed");
     if (job && ["queued", "running"].includes(job.run.status))
       this.update(job.run, "failed", {
         error: { code: "worker_failed", message: "Execution worker stopped" },
@@ -830,6 +964,7 @@ export class AgentsBackend {
       });
       // A start can arrive before the dispatch response.
     } catch (error) {
+      if (job.run.status === "running") this.closeNodes(job, "dispatch_failed");
       if (job.run.status === "running")
         this.update(job.run, "failed", {
           error: {
@@ -1101,6 +1236,7 @@ export class AgentsBackend {
             };
             const detail: Detail = {
               run,
+              executions: [],
               conversations: body.conversationId
                 ? [
                     {
@@ -1113,7 +1249,16 @@ export class AgentsBackend {
             this.runs.set(run.id, detail);
             this.events.set(run.id, []);
             this.update(run, "queued");
-            const job: Job = { run, cwd, executions: new Map(), failed: false };
+            const job: Job = {
+              run,
+              cwd,
+              executions: new Map(),
+              failed: false,
+              nodeSequence: 0,
+              nodeBatches: new Map(),
+              nodeExecutions: new Map(),
+              nodeDrained: false,
+            };
             this.jobs.set(run.id, job);
             const response = structuredClone(detail);
             if (key)

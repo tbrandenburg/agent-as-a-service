@@ -33,12 +33,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function respond(response, code, body) { response.writeHead(code, { "content-type": "application/json" }); response.end(JSON.stringify(body)); }
 async function failed(id) {
   try {
-    await fetch("http://api:3095/worker-failed", {
+    const response = await fetch("http://api:3095/worker-failed", {
       method: "POST",
       headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" },
       body: JSON.stringify({ runId: id }),
       signal: AbortSignal.timeout(5000),
     });
+    if (!response.ok) throw new Error(`Worker failure rejected (${response.status})`);
   } catch (error) {
     console.error("Worker failure callback failed", error instanceof Error ? error.message : "unknown");
   }
@@ -47,7 +48,15 @@ async function stop(id) {
   const worker = workers.get(id);
   if (!worker) return;
   if (worker.stopping) return worker.stopping;
-  worker.stopping = cleanup(id, worker).catch((error) => {
+  worker.stopping = (async () => {
+    if (!worker.exited && worker.port) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${worker.port}/drain`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(5000) });
+        if (!response.ok) await failed(id);
+      } catch { await failed(id); }
+    }
+    await cleanup(id, worker);
+  })().catch((error) => {
     worker.stopping = null;
     throw error;
   });
@@ -55,9 +64,14 @@ async function stop(id) {
 }
 async function cleanup(id, worker) {
   clearTimeout(worker.timeout);
-  if (!worker.exited && worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill("SIGTERM");
+  const signal = (name) => {
+    if (worker.group) {
+      try { process.kill(-worker.group, name); } catch (error) { if (error.code !== "ESRCH") throw error; }
+    } else if (!worker.exited && worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill(name);
+  };
+  signal("SIGTERM");
   await Promise.race([worker.exit, sleep(5000)]);
-  if (!worker.exited && worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill("SIGKILL");
+  signal("SIGKILL");
   await worker.exit;
   await rm(worker.dir, { recursive: true, force: true });
   workers.delete(id);
@@ -113,8 +127,8 @@ async function launch(job) {
       socket.once("error", reject);
       socket.listen(0, "127.0.0.1", () => { const chosen = socket.address().port; socket.close(() => resolve(chosen)); });
     });
-    const child = spawn("node", ["/usr/src/node-red/node_modules/node-red/red.js", "--userDir", dir, "--settings", join(dir, "settings.js"), "--port", String(port)], { cwd, stdio: "inherit", env: { ...process.env, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
-    const worker = { child, dir, exited: false, exit: null, timeout: null };
+    const child = spawn("node", ["/seed/worker-host.js", dir, String(port), job.runId], { cwd, stdio: "inherit", detached: true, env: { ...process.env, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
+    const worker = { child, dir, port, group: child.pid, exited: false, exit: null, timeout: null };
     worker.exit = new Promise((resolve) => {
       const settled = () => { worker.exited = true; resolve(); if (workers.has(job.runId)) void failed(job.runId).finally(() => stop(job.runId)); };
       child.once("exit", settled);
@@ -132,6 +146,8 @@ async function launch(job) {
       if (attempt === 149) throw new Error("Worker readiness timeout");
       await sleep(200);
     }
+    const activated = await fetch(`http://127.0.0.1:${port}/activate`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(5000) });
+    if (!activated.ok) throw new Error("Worker observer could not activate");
     const response = await fetch(`http://127.0.0.1:${port}${job.path}`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ runId: job.runId, text: job.text, sessionID: job.sessionID }), signal: AbortSignal.timeout(10_000) });
     if (response.status !== 202) throw new Error("Worker dispatch rejected");
   } catch (error) {

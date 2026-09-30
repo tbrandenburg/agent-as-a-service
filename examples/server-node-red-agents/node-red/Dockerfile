@@ -8,6 +8,7 @@ COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/cwd-list
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/flows.json /seed/flows.json
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/settings.js /seed/settings.js
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/supervisor.js /seed/supervisor.js
+COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/worker-host.js examples/server-node-red-agents/node-red/observer.js /seed/
 RUN mkdir -p /data/agent-work /data/projects && chown -R node-red:node-red /data /seed
 RUN rm -f /data/flows.json
 WORKDIR /usr/src/node-red

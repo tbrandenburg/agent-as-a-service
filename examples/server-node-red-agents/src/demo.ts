@@ -33,6 +33,48 @@ const call = (
 function ensure(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+const observed = async (
+  detail: {
+    run: { id: string };
+    executions?: {
+      id: string;
+      runId: string;
+      key?: string | null;
+      status: string;
+    }[];
+  },
+  nodeId: string,
+  minimum: number,
+) => {
+  const deadline = Date.now() + 10_000;
+  while (
+    Date.now() < deadline &&
+    (detail.executions ?? []).filter(
+      (execution) =>
+        execution.key?.endsWith(nodeId) && execution.status === "completed",
+    ).length < minimum
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const updated = await api.runs.getRun({ params: { runId: detail.run.id } });
+    ensure(updated.status === 200, `Run ${detail.run.id} disappeared`);
+    detail = updated.body;
+  }
+  const executions = detail.executions ?? [];
+  ensure(executions.length > 0, `No node executions for ${detail.run.id}`);
+  ensure(
+    new Set(executions.map((execution) => execution.id)).size ===
+      executions.length &&
+      executions.every((execution) => execution.runId === detail.run.id),
+    `Invalid invocation IDs for ${detail.run.id}`,
+  );
+  ensure(
+    executions.filter(
+      (execution) =>
+        execution.key?.endsWith(nodeId) && execution.status === "completed",
+    ).length >= minimum,
+    `Missing completed ${nodeId} invocations for ${detail.run.id}: ${JSON.stringify(executions)}`,
+  );
+};
 const poll = async (id: string) => {
   const deadline = Date.now() + 900_000;
   while (Date.now() < deadline) {
@@ -95,6 +137,15 @@ for (const accepted of [first, second]) {
       .length === 2,
     "repeated writer invocation",
   );
+  await observed(complete, "writer-agent", 2);
+  await observed(complete, "reviewer-agent", 1);
+  for (const nodeId of [
+    "aaas-probe-exec",
+    "aaas-probe-file",
+    "aaas-probe-list",
+    "aaas-probe-check",
+  ])
+    await observed(complete, nodeId, 1);
   console.log(
     `Observed run ${id}: 3 linked conversations with complete messages`,
   );
@@ -186,6 +237,7 @@ ensure(
 );
 const managedResult = await poll(managedRun.body.run.id);
 ensure(managedResult.conversations?.length === 1, "managed agent conversation");
+await observed(managedResult, "-writer", 1);
 const managedMessages = await api.conversations.listMessages({
   params: { conversationId: managedResult.conversations[0].conversationId },
   query: { limit: 10 },
@@ -224,7 +276,7 @@ ensure(
   secondRun.status === 202 && secondRun.body.run.workflowVersion === 2,
   "updated version runs",
 );
-await poll(secondRun.body.run.id);
+await observed(await poll(secondRun.body.run.id), "-writer", 1);
 ensure(
   (
     await call(`/workflows/${id}`, "PUT", managed("Still stale"), {

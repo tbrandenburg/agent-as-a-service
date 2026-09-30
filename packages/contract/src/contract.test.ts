@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   definitionInput,
+  execution,
+  runStatus,
   runDetail,
   run as runSchema,
   runStart,
@@ -205,6 +207,17 @@ describe("REST specification", () => {
         ],
       }).success,
     ).toBe(true);
+  });
+  it("distinguishes unconfirmed invocations from successful completions", () => {
+    expect(
+      execution.parse({
+        id: "invocation",
+        runId: "run",
+        key: "node",
+        status: "unconfirmed",
+      }).status,
+    ).toBe("unconfirmed");
+    expect(runStatus.safeParse("unconfirmed").success).toBe(false);
   });
   it("links public conversations to a run without requiring a conversation", () => {
     const base = {
