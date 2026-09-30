@@ -62,6 +62,14 @@ internal.post("/observations", (request, response) => {
   const result = backend.observe(request.body);
   response.status(result.status).json(result.body);
 });
+internal.post("/node-observations", (request, response) => {
+  const result = backend.observeNodes(request.body);
+  response.status(result.status).json(result.body);
+});
+internal.post("/node-drain", (request, response) => {
+  const result = backend.drainNodes(request.body);
+  response.status(result.status).json(result.body);
+});
 internal.get("/inventory", (_request, response) => {
   response.json(Object.fromEntries(backend.inventory));
 });

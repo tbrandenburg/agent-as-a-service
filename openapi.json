@@ -8591,7 +8591,8 @@
                               "completed",
                               "failed",
                               "skipped",
-                              "cancelled"
+                              "cancelled",
+                              "unconfirmed"
                             ]
                           },
                           "output": {}
@@ -9327,7 +9328,8 @@
                               "completed",
                               "failed",
                               "skipped",
-                              "cancelled"
+                              "cancelled",
+                              "unconfirmed"
                             ]
                           },
                           "output": {}

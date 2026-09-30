@@ -112,6 +112,7 @@ export const execution = z.object({
     "failed",
     "skipped",
     "cancelled",
+    "unconfirmed",
   ]),
   output: z.unknown().optional(),
 });

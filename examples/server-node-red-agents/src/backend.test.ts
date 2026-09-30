@@ -72,6 +72,189 @@ const run = async (app: ReturnType<typeof setup>["app"], text?: string) => {
 };
 
 describe("Node-RED lifecycle boundary", () => {
+  it("stores ordered idempotent node observations separately from provider conversations and finalizer status", async () => {
+    const { backend, app } = setup();
+    const id = await run(app);
+    const batch = {
+      runId: id,
+      observations: [
+        { sequence: 1, type: "sent", nodeId: "source" },
+        {
+          sequence: 2,
+          type: "received",
+          nodeId: "writer",
+          executionId: "invocation-1",
+          status: "running",
+        },
+        {
+          sequence: 3,
+          type: "received",
+          nodeId: "writer",
+          executionId: "invocation-2",
+          status: "running",
+        },
+        {
+          sequence: 4,
+          type: "completed",
+          nodeId: "writer",
+          executionId: "invocation-2",
+          status: "failed",
+        },
+        {
+          sequence: 5,
+          type: "completed",
+          nodeId: "writer",
+          executionId: "invocation-1",
+          status: "completed",
+        },
+        {
+          sequence: 6,
+          type: "received",
+          nodeId: "legacy",
+          executionId: "invocation-3",
+          status: "running",
+        },
+      ],
+    };
+    expect(backend.observeNodes(batch).status).toBe(200);
+    expect(backend.observeNodes(batch).status).toBe(200);
+    expect(
+      backend.observeNodes({
+        ...batch,
+        observations: [{ ...batch.observations[0], nodeId: "other" }],
+      }).status,
+    ).toBe(409);
+    expect(
+      backend.observeNodes({
+        runId: id,
+        observations: [{ sequence: 8, type: "sent", nodeId: "x" }],
+      }).status,
+    ).toBe(409);
+    expect(
+      backend.observeNodes({
+        runId: id,
+        observations: [
+          {
+            sequence: 7,
+            type: "completed",
+            nodeId: "wrong",
+            executionId: "invocation-3",
+            status: "completed",
+          },
+        ],
+      }).status,
+    ).toBe(409);
+    expect(
+      backend.observeNodes({
+        runId: id,
+        observations: [
+          {
+            sequence: 7,
+            type: "completed",
+            nodeId: "legacy",
+            executionId: "invocation-2",
+            status: "completed",
+          },
+        ],
+      }).status,
+    ).toBe(409);
+    expect(backend.drainNodes({ runId: id }).status).toBe(200);
+    expect(backend.runs.get(id)?.run.status).toBe("running");
+    const snapshot = await request(app).get(`/api/v1/runs/${id}`).set(auth);
+    expect(snapshot.body.executions).toEqual([
+      { id: "invocation-1", runId: id, key: "writer", status: "completed" },
+      { id: "invocation-2", runId: id, key: "writer", status: "failed" },
+      { id: "invocation-3", runId: id, key: "legacy", status: "unconfirmed" },
+    ]);
+    expect(snapshot.body.conversations).toEqual([]);
+    const agent = started(id);
+    expect(backend.observe(agent).status).toBe(200);
+    expect(backend.observe(terminal(agent)).status).toBe(200);
+    expect(backend.finalize(done(id)).status).toBe(200);
+    expect(backend.runs.get(id)?.run.status).toBe("completed");
+    expect(backend.runs.get(id)?.executions?.[1].status).toBe("failed");
+    expect(backend.events.get(id)?.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 12 }, (_, index) => index + 1),
+    );
+    expect(
+      backend.observeNodes({
+        runId: id,
+        observations: [{ sequence: 7, type: "sent", nodeId: "late" }],
+      }).status,
+    ).toBe(409);
+  });
+
+  it("keeps worker crash and callback interruption visible without changing a finalized run", async () => {
+    const { backend, app } = setup();
+    const id = await run(app);
+    expect(
+      backend.observeNodes({
+        runId: id,
+        observations: [
+          {
+            sequence: 1,
+            type: "received",
+            nodeId: "async",
+            executionId: "a",
+            status: "running",
+          },
+        ],
+      }).status,
+    ).toBe(200);
+    backend.workerFailed(id);
+    expect(backend.runs.get(id)?.executions?.[0].status).toBe("unconfirmed");
+    expect(backend.runs.get(id)?.run.error?.code).toBe("worker_failed");
+    expect(
+      backend.events
+        .get(id)
+        ?.some((event) => event.type === "observation.incomplete"),
+    ).toBe(true);
+  });
+
+  it("preserves callback interruption reason and replayed observations across shutdown", async () => {
+    const { backend, app } = setup();
+    const id = await run(app);
+    const batch = {
+      runId: id,
+      observations: [
+        {
+          sequence: 1,
+          type: "received",
+          nodeId: "writer",
+          executionId: "first",
+          status: "running",
+        },
+      ],
+    };
+    expect(backend.observeNodes(batch).status).toBe(200);
+    expect(
+      backend.observeNodes({
+        runId: id,
+        observations: [
+          {
+            sequence: 2,
+            type: "completed",
+            nodeId: "writer",
+            executionId: "first",
+            status: "completed",
+          },
+        ],
+      }).status,
+    ).toBe(200);
+    expect(backend.observeNodes(batch).status).toBe(200);
+    expect(
+      backend.drainNodes({ runId: id, incomplete: "callback_failed" }).status,
+    ).toBe(200);
+    expect(
+      backend.drainNodes({ runId: id, incomplete: "callback_failed" }).status,
+    ).toBe(200);
+    expect(
+      backend.events
+        .get(id)
+        ?.filter((event) => event.type === "observation.incomplete"),
+    ).toMatchObject([{ data: { reason: "callback_failed" } }]);
+    expect(backend.runs.get(id)?.executions?.[0].status).toBe("completed");
+  });
   it("rejects active capacity before 202 but accepts turnover at configured capacity", async () => {
     let releaseStop!: () => void;
     const stopped = new Promise<void>((resolve) => {

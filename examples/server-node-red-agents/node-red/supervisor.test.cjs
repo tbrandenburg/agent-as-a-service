@@ -32,6 +32,18 @@ test("stop terminates a running process and removes only its worker data", async
   await assert.rejects(readdir(dir), { code: "ENOENT" });
 });
 
+test("stop terminates subprocesses owned by the isolated worker group", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "aaas-stop-group-"));
+  const child = spawn(process.execPath, ["-e", "require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)"], { detached: true, stdio: "ignore" });
+  const worker = { child, dir, group: child.pid, exited: false, timeout: setTimeout(() => {}, 5000), exit: null };
+  worker.exit = new Promise((resolve) => child.once("exit", () => { worker.exited = true; resolve(); }));
+  workers.set("group", worker);
+  await stop("group");
+  assert.equal(workers.has("group"), false);
+  await assert.rejects(readdir(dir), { code: "ENOENT" });
+  assert.throws(() => process.kill(-child.pid, 0), { code: "ESRCH" });
+});
+
 test("replacement waits for exit and cleanup while a stopping worker holds the last slot", async () => {
   const dirs = await Promise.all(Array.from({ length: 4 }, () => mkdtemp(join(tmpdir(), "aaas-turnover-"))));
   let exit;

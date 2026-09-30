@@ -39,16 +39,37 @@ credentials() {
   fi
 }
 
+check_demo_space() {
+  local docker_root available
+  docker_root="$(docker info --format '{{.DockerRootDir}}')" || return 1
+  available="$(df -Pk "$docker_root" | awk 'NR == 2 {print $4}')" || return 1
+  if [[ ! "$available" =~ ^[0-9]+$ ]]; then
+    printf 'Could not determine free space for Docker root %s\n' "$docker_root" >&2
+    return 1
+  fi
+  if ((available < 4 * 1024 * 1024)); then
+    printf 'Docker root %s needs at least 4 GiB free before building the disposable demo (available: %s KiB)\n' "$docker_root" "$available" >&2
+    return 1
+  fi
+}
+
 if [[ "$action" == demo ]]; then
   project="aas-node-red-agents-demo-$(< /proc/sys/kernel/random/uuid)"
   export API_TOKEN="${API_TOKEN:-dev-token}" INTERNAL_TOKEN="${INTERNAL_TOKEN:-internal-observer-demo-token}" NODE_RED_ADMIN_TOKEN="${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}"
   credentials
+  check_demo_space
   cleanup_demo() {
-    local status=$? image
+    local status=$? image present
     trap - EXIT
-    compose down --volumes --remove-orphans || status=1
+    if ! compose down --volumes --remove-orphans; then
+      printf 'Could not remove disposable project %s; preserving its images until containers are removed\n' "$project" >&2
+      exit 1
+    fi
     for image in "${project}-api:latest" "${project}-node-red:latest"; do
-      if docker image inspect "$image" >/dev/null 2>&1; then
+      if ! present="$(docker image ls --quiet --filter "reference=$image")"; then
+        printf 'Could not list disposable image %s\n' "$image" >&2
+        status=1
+      elif [[ -n "$present" ]]; then
         docker image rm "$image" >/dev/null || status=1
       fi
     done
