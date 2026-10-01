@@ -1,0 +1,30 @@
+name: Weekly mutation quality
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  managed-workflow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEFAULT_MODEL: github-copilot/gpt-6-luna
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: make install
+      - run: timeout 15m make quality-mutation
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: managed-workflow-mutation
+          path: data/quality/
+          if-no-files-found: error

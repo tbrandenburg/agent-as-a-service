@@ -1,0 +1,78 @@
+{
+  "sizes": {
+    "examples/server-node-red-agents/node-red/cwd-list/cwd-list.js": 17,
+    "examples/server-node-red-agents/node-red/native.test.cjs": 143,
+    "examples/server-node-red-agents/node-red/observer.js": 83,
+    "examples/server-node-red-agents/node-red/observer.test.cjs": 60,
+    "examples/server-node-red-agents/node-red/settings.js": 52,
+    "examples/server-node-red-agents/node-red/supervisor.js": 181,
+    "examples/server-node-red-agents/node-red/supervisor.test.cjs": 202,
+    "examples/server-node-red-agents/node-red/worker-host.js": 84,
+    "examples/server-node-red-agents/src/admin.ts": 151,
+    "examples/server-node-red-agents/src/backend.test.ts": 531,
+    "examples/server-node-red-agents/src/backend.ts": 1369,
+    "examples/server-node-red-agents/src/flow.test.ts": 37,
+    "examples/server-node-red-agents/src/instance.test.ts": 251,
+    "examples/server-node-red-agents/src/main.ts": 105,
+    "examples/server-node-red-agents/src/managed.test.ts": 425,
+    "examples/server-node-red-agents/src/managed.ts": 188,
+    "examples/server-node-red-agents/src/projects.test.ts": 364,
+    "examples/server-node-red-agents/src/projects.ts": 287
+  },
+  "ratios": {
+    "examples/server-node-red-agents/node-red/observer.test.cjs": 0.7228915662650602,
+    "examples/server-node-red-agents/node-red/supervisor.test.cjs": 1.1160220994475138,
+    "examples/server-node-red-agents/src/backend.test.ts": 0.38787436084733384,
+    "examples/server-node-red-agents/src/managed.test.ts": 2.2606382978723403,
+    "examples/server-node-red-agents/src/projects.test.ts": 1.2682926829268293
+  },
+  "complexity": {
+    "examples/server-node-red-agents/node-red/settings.js#1": 12,
+    "examples/server-node-red-agents/node-red/supervisor.js#1": 23,
+    "examples/server-node-red-agents/src/admin.ts#1": 12,
+    "examples/server-node-red-agents/src/backend.ts#1": 66,
+    "examples/server-node-red-agents/src/backend.ts#2": 44,
+    "examples/server-node-red-agents/src/backend.ts#3": 39,
+    "examples/server-node-red-agents/src/backend.ts#4": 23,
+    "examples/server-node-red-agents/src/backend.ts#5": 14,
+    "examples/server-node-red-agents/src/backend.ts#6": 11,
+    "examples/server-node-red-agents/src/backend.ts#7": 11,
+    "examples/server-node-red-agents/src/managed.ts#1": 40,
+    "examples/server-node-red-agents/src/projects.ts#1": 29
+  },
+  "runtime": {
+    "coverage-suite-ms": 7146.531986,
+    "coverage:examples/server-node-red-agents/src/backend.test.ts": 316.173583984375,
+    "coverage:examples/server-node-red-agents/src/flow.test.ts": 8.057373046875,
+    "coverage:examples/server-node-red-agents/src/instance.test.ts": 1082.0703125,
+    "coverage:examples/server-node-red-agents/src/managed.test.ts": 262.188720703125,
+    "coverage:examples/server-node-red-agents/src/projects.test.ts": 972.689208984375,
+    "examples/server-express/src/adapters/provider-bridge.test.ts": 8.58251953125,
+    "examples/server-express/src/app.test.ts": 248.53564453125,
+    "examples/server-express/src/demo.test.ts": 428.49169921875,
+    "examples/server-node-red-agents/src/backend.test.ts": 294.5205078125,
+    "examples/server-node-red-agents/src/flow.test.ts": 6.868408203125,
+    "examples/server-node-red-agents/src/instance.test.ts": 1077.0634765625,
+    "examples/server-node-red-agents/src/managed.test.ts": 238.74658203125,
+    "examples/server-node-red-agents/src/projects.test.ts": 1057.570556640625,
+    "examples/server-node-red/src/implementation.test.ts": 157.957763671875,
+    "packages/contract/src/contract.test.ts": 38.888671875,
+    "suite-ms": 9649.113848
+  },
+  "coverage": {
+    "examples/server-node-red-agents/node-red/cwd-list/cwd-list.js": 100,
+    "examples/server-node-red-agents/node-red/observer.js": 0,
+    "examples/server-node-red-agents/node-red/settings.js": 0,
+    "examples/server-node-red-agents/node-red/supervisor.js": 0,
+    "examples/server-node-red-agents/node-red/worker-host.js": 0,
+    "examples/server-node-red-agents/src/admin.ts": 23.8,
+    "examples/server-node-red-agents/src/backend.ts": 80.49,
+    "examples/server-node-red-agents/src/main.ts": 0,
+    "examples/server-node-red-agents/src/managed.ts": 81.94,
+    "examples/server-node-red-agents/src/projects.ts": 81.39,
+    "total": 53.62
+  },
+  "mutation": {
+    "managed.ts": 51.93798449612403
+  }
+}

@@ -52,6 +52,8 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-10-01: Pitfall: Native Link Out(return) snapshots omit empty wires, breaking exact deployment verification. Prevention rule/countermeasure: Normalize native Admin API representations on both sides and verify managed CRUD against a real runtime before accepting fixture-only checks.
+- 2026-10-01: Pitfall: Replacing a native-link fixture through per-tab deployment left stale runtime wiring. Prevention rule/countermeasure: Use full native deployment for test-only graph replacement and restore the complete snapshot before provider acceptance.
 - 2026-09-30: Pitfall: A filesystem proof chain replaced the agent task prompt with its bare topic, provoking tool searches and empty-output failures. Prevention rule/countermeasure: Preserve and restore task payloads across probes; regression-test the exact prompt reaching the agent.
 - 2026-09-30: Pitfall: A direct authenticated CLI run passed while real workflows intermittently failed with agent exit code 0. Prevention rule/countermeasure: Require fresh Core and managed E2E and correlate terminal events with worker metrics before declaring model switching validated.
 - 2026-09-30: Pitfall: Killing a worker host left its spawned model CLI running after worker cleanup. Prevention rule/countermeasure: launch each worker in an isolated process group and terminate the group on shutdown or crash.

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check security lint format-check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
+.PHONY: help install generate openapi catalog parity-doc check quality quality-coverage quality-mutation quality-test security lint format-check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
 
 help:
 	@printf '%s\n' \
@@ -8,6 +8,9 @@ help:
 	  'check             Run lint, typecheck, tests, OpenAPI/parity and format checks' \
 	  'security          Audit root and Node-RED agent npm dependencies' \
 	  'lint              Lint TypeScript source with Oxlint' \
+	  'quality           Warn on Node-RED source/test size, ratio and complexity growth' \
+	  'quality-coverage  Measure Node-RED branch coverage and warn on regressions' \
+	  'quality-mutation  Run bounded managed-workflow mutation testing' \
 	  'format-check      Check TypeScript formatting with Prettier' \
 	  'format            Format TypeScript source' \
 	  'dev               Start the example Express server in watch mode' \
@@ -42,7 +45,7 @@ catalog:
 parity-doc:
 	npm run parity:doc
 
-check: lint typecheck test validate-openapi parity format-check
+check: lint typecheck test quality-test validate-openapi parity format-check
 
 security:
 	npm audit
@@ -50,6 +53,19 @@ security:
 
 lint:
 	npm run lint
+	npm run quality
+
+quality:
+	npm run quality
+
+quality-coverage:
+	npm run quality:coverage
+
+quality-mutation:
+	npm run quality:mutation
+
+quality-test:
+	npm run quality:test
 
 format-check:
 	npm run format:check

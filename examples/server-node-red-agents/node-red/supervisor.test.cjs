@@ -7,31 +7,6 @@ const { join } = require("node:path");
 const { Readable, PassThrough } = require("node:stream");
 const { test } = require("node:test");
 const { stop, start, workers, server, forwardWorkerOutput } = require("./supervisor.js");
-const { addCoreProbes } = require("./core-probes.js");
-
-test("Core cwd proof preserves the writer instruction and rejects invalid cwd evidence", () => {
-  const tab = { configs: [], nodes: [{ id: "workflow-entry", wires: [["writer-agent"]] }] };
-  addCoreProbes(tab, "core");
-  const execute = (id, msg, errors = []) => {
-    const node = tab.nodes.find((node) => node.id === id);
-    return new Function("msg", "env", "node", node.func)(msg, { get: () => "/data/agent-work" }, { error: (error) => errors.push(error) });
-  };
-  const prompt = "In one sentence, draft a release note about A faster search index. Reply only with the sentence.";
-  const msg = { runId: "proof", text: "A faster search index", payload: prompt };
-  assert.deepEqual(tab.nodes[0].wires[0], ["aaas-probe-prompt"]);
-  execute("aaas-probe-prompt", msg);
-  msg.payload = "/data/agent-work\n";
-  execute("aaas-probe-check", msg);
-  assert.equal(msg.payload, msg.text);
-  msg.cwdListing = { directory: "/data/agent-work", files: [msg.filename] };
-  execute("aaas-probe-list-check", msg);
-  assert.equal(msg.payload, prompt);
-  assert.equal("aaasWriterPrompt" in msg, false);
-  const errors = [];
-  assert.equal(execute("aaas-probe-check", { payload: "/wrong\n" }, errors), null);
-  assert.equal(execute("aaas-probe-list-check", { cwdListing: { directory: "/wrong", files: [] } }, errors), null);
-  assert.equal(errors.length, 2);
-});
 
 test("native metrics require the opt-in switch and a run worker", () => {
   for (const [worker, metrics, expected] of [

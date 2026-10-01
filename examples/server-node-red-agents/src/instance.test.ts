@@ -83,8 +83,8 @@ printf 'df %s\\n' "$*" >> "$CALLS"
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/fake 9999999 0 %s 0%% /\\n' "$FAKE_FREE_KIB"
 `,
   );
-  for (const name of ["docker", "df", "curl", "npm"]) {
-    if (name === "curl" || name === "npm")
+  for (const name of ["docker", "df", "curl", "npm", "node"]) {
+    if (name === "curl" || name === "npm" || name === "node")
       await writeFile(join(root, name), "#!/usr/bin/env bash\nexit 0\n");
     await chmod(join(root, name), 0o755);
   }

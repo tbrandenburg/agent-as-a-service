@@ -1,0 +1,10 @@
+[
+  {"id":"cwd-tab","type":"tab","label":"Test-only cwd fixture"},
+  {"id":"cwd-in","z":"cwd-tab","type":"link in","wires":[["cwd-exec"]]},
+  {"id":"cwd-exec","z":"cwd-tab","type":"exec","command":"pwd","addpay":false,"useSpawn":"false","wires":[["cwd-check"],[],[]]},
+  {"id":"cwd-check","z":"cwd-tab","type":"function","outputs":1,"func":"if(msg.payload.trim()!==env.get('WORKER_CWD')) {node.error('Exec cwd mismatch',msg);return null;}msg.filename='cwd-proof.txt';msg.payload=msg.input.text;return msg;","wires":[["cwd-file"]]},
+  {"id":"cwd-file","z":"cwd-tab","type":"file","filename":"filename","filenameType":"msg","appendNewline":false,"overwriteFile":"true","createDir":false,"encoding":"none","wires":[["cwd-list"]]},
+  {"id":"cwd-list","z":"cwd-tab","type":"cwd-list-example","wires":[["cwd-list-check"]]},
+  {"id":"cwd-list-check","z":"cwd-tab","type":"function","outputs":1,"func":"if(msg.cwdListing.directory!==env.get('WORKER_CWD')||!msg.cwdListing.files.includes(msg.filename)){node.error('JS listing cwd mismatch',msg);return null;}msg.payload=msg.input.text;return msg;","wires":[["cwd-return"]]},
+  {"id":"cwd-return","z":"cwd-tab","type":"link out","mode":"return","links":[],"wires":[]}
+]

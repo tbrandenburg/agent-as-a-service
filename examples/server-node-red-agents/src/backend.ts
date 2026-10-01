@@ -63,7 +63,9 @@ type Result = {
 };
 export type Executor = (payload: {
   runId: string;
-  text: string;
+  text?: string;
+  input?: z.infer<typeof schemas.runInput>;
+  target?: string;
   path: string;
   cwd?: string;
   tab?: Tab;
@@ -77,7 +79,7 @@ const workflow: z.infer<typeof schemas.definition> = {
   name: "Core",
   engine: "node-red",
   specificationVersion: "5.x",
-  specification: { endpoint: "/workflow/agents" },
+  specification: { entry: "workflow-in" },
   version: 1,
   readOnly: true,
   createdAt: new Date().toISOString(),
@@ -873,7 +875,8 @@ export class AgentsBackend {
       !text(value.runId) ||
       !text(value.eventId) ||
       !["completed", "failed"].includes(String(value.status)) ||
-      (value.status === "completed" && !text(value.output))
+      (value.status === "completed" &&
+        !schemas.runOutput.safeParse(value.output).success)
     )
       return reject("Invalid finalization", 400);
     const body = canonical(value);
@@ -888,7 +891,7 @@ export class AgentsBackend {
     if (
       value.status === "completed" &&
       ((job.failed && !job.run.conversationId) ||
-        job.executions.size === 0 ||
+        (job.run.target?.kind === "agent" && job.executions.size === 0) ||
         [...job.executions.values()].some(
           (execution) => execution.terminal !== "completed",
         ))
@@ -902,7 +905,9 @@ export class AgentsBackend {
         },
       });
     else if (value.status === "completed")
-      this.update(job.run, "completed", { output: value.output as string });
+      this.update(job.run, "completed", {
+        output: schemas.runOutput.parse(value.output),
+      });
     else
       this.update(job.run, "failed", {
         error: {
@@ -947,7 +952,7 @@ export class AgentsBackend {
 
   private async send(
     job: Job,
-    text: string,
+    input: z.infer<typeof schemas.runInput>,
     path: string,
     cwd?: string,
     tab?: Tab,
@@ -956,7 +961,9 @@ export class AgentsBackend {
     try {
       await this.dispatch({
         runId: job.run.id,
-        text,
+        ...(job.run.target?.kind === "agent"
+          ? { text: (input as { text: string }).text }
+          : { input, target: path }),
         path,
         cwd,
         tab,
@@ -1138,11 +1145,16 @@ export class AgentsBackend {
             if (
               body.engineOptions ||
               !body.target ||
-              !record(body.input) ||
-              !text(body.input.text) ||
-              Object.keys(body.input).some((field) => field !== "text")
+              !schemas.runInput.safeParse(body.input).success
             )
-              return invalid("Only text input is supported");
+              return invalid("A target and valid input are required");
+            if (
+              body.target.kind === "agent" &&
+              (!record(body.input) ||
+                !text(body.input.text) ||
+                Object.keys(body.input).some((field) => field !== "text"))
+            )
+              return invalid("Only text input is supported for direct agents");
             if (
               [...this.jobs.values()].filter(({ run }) =>
                 ["queued", "running", "paused"].includes(run.status),
@@ -1219,7 +1231,6 @@ export class AgentsBackend {
                 "workflow_unavailable",
                 "Workflow snapshot unavailable",
               );
-            const prompt = (body.input as { text: string }).text;
             const now = new Date().toISOString();
             const run: Run = {
               id: randomUUID(),
@@ -1272,7 +1283,7 @@ export class AgentsBackend {
               body.target.kind === "agent"
                 ? "/agent/writer-agent"
                 : definition!.id === workflow.id
-                  ? "/workflow/agents"
+                  ? "workflow-in"
                   : entryOf(this.registry[definition!.id].tab);
             const sessionID = body.conversationId
               ? this.sessions.get(body.conversationId)
@@ -1281,7 +1292,7 @@ export class AgentsBackend {
               () =>
                 void this.send(
                   job,
-                  prompt,
+                  body.input!,
                   path,
                   cwd,
                   tab ?? undefined,

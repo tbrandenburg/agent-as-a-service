@@ -1,4 +1,5 @@
 import { createClient, startRun } from "../../client/src/index.js";
+import { execFileSync } from "node:child_process";
 
 const base = process.env.DEMO_BASE_URL;
 const token = process.env.API_TOKEN;
@@ -96,11 +97,15 @@ ensure(
 );
 const first = await startRun(api, {
   target: { kind: "workflow", workflowId: "node-red-demo" },
-  input: { text: "A faster search index" },
+  input: {
+    text: "In one sentence, draft a release note about a faster search index.",
+  },
 });
 const second = await startRun(api, {
   target: { kind: "workflow", workflowId: "node-red-demo" },
-  input: { text: "Clearer navigation" },
+  input: {
+    text: "In one sentence, draft a release note about clearer navigation.",
+  },
 });
 ensure(
   first.status === 202 &&
@@ -112,8 +117,8 @@ for (const accepted of [first, second]) {
   const id = accepted.body.run.id;
   const complete = await poll(id);
   ensure(
-    complete.conversations?.length === 3 && complete.run.output,
-    "parallel branches joined and final agent completed",
+    complete.conversations?.length === 1 && complete.run.output,
+    "one Core agent returned a result",
   );
   for (const link of complete.conversations) {
     const conversation = await api.conversations.getConversation({
@@ -133,21 +138,12 @@ for (const accepted of [first, second]) {
     );
   }
   ensure(
-    complete.conversations.filter((link) => link.nodeId === "writer-agent")
-      .length === 2,
-    "repeated writer invocation",
+    complete.conversations[0].nodeId === "core-agent",
+    "Core conversation link",
   );
-  await observed(complete, "writer-agent", 2);
-  await observed(complete, "reviewer-agent", 1);
-  for (const nodeId of [
-    "aaas-probe-exec",
-    "aaas-probe-file",
-    "aaas-probe-list",
-    "aaas-probe-check",
-  ])
-    await observed(complete, nodeId, 1);
+  await observed(complete, "core-agent", 1);
   console.log(
-    `Observed run ${id}: 3 linked conversations with complete messages`,
+    `Observed run ${id}: one linked conversation with complete messages`,
   );
 }
 const listed = await api.runs.listRuns({ query: { limit: 1 } });
@@ -222,6 +218,35 @@ ensure(
 );
 const definition = (await created.json()) as { id: string };
 const id = definition.id;
+if (process.env.DEMO_COMPOSE_PROJECT) {
+  const snapshot = JSON.parse(
+    execFileSync(
+      "docker",
+      [
+        "compose",
+        "-p",
+        process.env.DEMO_COMPOSE_PROJECT,
+        "-f",
+        "examples/server-node-red-agents/compose.yaml",
+        "exec",
+        "-T",
+        "node-red",
+        "node",
+        "-e",
+        `fetch('http://127.0.0.1:1880/flow/${id}',{headers:{authorization:'Bearer '+process.env.NODE_RED_ADMIN_TOKEN}}).then(async r=>{if(!r.ok)throw new Error('Snapshot unavailable');console.log(JSON.stringify(await r.json()))}).catch(e=>{console.error(e.message);process.exitCode=1})`,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    ),
+  ) as { nodes: { type: string; mode?: string }[] };
+  ensure(
+    snapshot.nodes.filter((node) => node.type === "link in").length === 1 &&
+      snapshot.nodes.some(
+        (node) => node.type === "link out" && node.mode === "return",
+      ) &&
+      !snapshot.nodes.some((node) => node.type.startsWith("http")),
+    "Managed native snapshot without HTTP infrastructure",
+  );
+}
 console.log(`Created managed tab ${id}: 201 "v1"`);
 ensure(
   (await call(`/workflows/${id}`, "GET")).headers.get("etag") === '"v1"',

@@ -4,7 +4,7 @@ import { createApp } from "../../server-express/src/index.js";
 import { AgentsBackend } from "./backend.js";
 import type { Admin, Store } from "./admin.js";
 import type { Registry, Tab } from "./managed.js";
-import { validate } from "./managed.js";
+import { tabFor, validate, entryOf } from "./managed.js";
 
 const auth = { authorization: "Bearer test-token" };
 const input = (label = "Writer") => ({
@@ -27,7 +27,17 @@ function setup() {
   let failDeploy = false;
   const admin: Admin = {
     async get(id) {
-      return tabs.get(id) ?? null;
+      const tab = tabs.get(id);
+      if (!tab) return null;
+      // Match the real Admin API: native return nodes omit their empty wires.
+      return {
+        ...tab,
+        nodes: tab.nodes.map((node) => {
+          if (node.type !== "link out" || node.mode !== "return") return node;
+          const { wires: _wires, ...returned } = node;
+          return returned as Tab["nodes"][number];
+        }),
+      };
     },
     async create(tab) {
       calls.push("create");
@@ -76,6 +86,37 @@ function setup() {
 }
 
 describe("managed workflow boundary", () => {
+  it("preserves entry/finalizer and text compatibility without flow HTTP transport", () => {
+    const definition = input();
+    expect(validate(definition)).toEqual([]);
+    const tab = tabFor(definition, "11111111-1111-1111-1111-111111111111");
+    const prefix = "aaas-11111111-1111-1111-1111-111111111111";
+    expect(entryOf(tab)).toBe(`${prefix}-in`);
+    expect(tab.nodes.find((node) => node.id === `${prefix}-in`)?.wires).toEqual(
+      [[`${prefix}-entry`]],
+    );
+    expect(
+      tab.nodes.find((node) => node.id === `${prefix}-entry`),
+    ).toMatchObject({
+      wires: [[`${prefix}-writer`]],
+      outputs: 1,
+    });
+    expect(
+      tab.nodes.find((node) => node.id === `${prefix}-writer`)?.wires[0],
+    ).toEqual([`${prefix}-return`]);
+    expect(
+      tab.nodes.find((node) => node.id === `${prefix}-return`),
+    ).toMatchObject({ type: "link out", mode: "return" });
+    expect(tab.nodes.some((node) => node.type.startsWith("http"))).toBe(false);
+    expect(JSON.stringify(tab)).not.toMatch(/INTERNAL_TOKEN|\/finalize/);
+    for (const field of ["returns", "bindings", "inputs", "output"])
+      expect(
+        validate({
+          ...definition,
+          specification: { ...definition.specification, [field]: {} },
+        }),
+      ).toContain("Unknown specification field");
+  });
   it("dispatches the accepted tab snapshot even if the editor definition changes afterwards", async () => {
     const tabs = new Map<string, Tab>();
     const admin: Admin = {

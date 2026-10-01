@@ -83,7 +83,8 @@ if [[ "$action" == demo ]]; then
   base="$(url)" || { compose logs >&2; exit 1; }
   ready "$base"
   printf 'Disposable project: %s | URL: %s\n' "$project" "$base"
-  (cd "$root" && DEMO_BASE_URL="$base" npm run demo:node-red-agents) || { compose logs >&2; exit 1; }
+  (cd "$root" && DEMO_COMPOSE_PROJECT="$project" DEMO_BASE_URL="$base" node --import tsx examples/server-node-red-agents/src/native-demo.ts) || { compose logs >&2; exit 1; }
+  (cd "$root" && DEMO_COMPOSE_PROJECT="$project" DEMO_BASE_URL="$base" npm run demo:node-red-agents) || { compose logs >&2; exit 1; }
   exit
 fi
 
