@@ -31,12 +31,6 @@ jobs:
           cache: npm
       - run: make install
       - run: make lint
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: quality-structure
-          path: data/quality/structure.json
-          if-no-files-found: error
 
   format:
     name: Checks / Format
@@ -62,21 +56,10 @@ jobs:
       - run: make install
       - run: make typecheck
       - run: make test
-      - run: make validate-openapi
-      - run: make parity
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: quality-runtime
-          path: data/quality/*.json
-          if-no-files-found: error
-
-  quality-coverage:
-    name: Checks / Quality coverage
+  contract:
+    name: Checks / Contract
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    env:
-      DEFAULT_MODEL: github-copilot/gpt-6-luna
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
@@ -84,10 +67,4 @@ jobs:
           node-version: '22'
           cache: npm
       - run: make install
-      - run: make quality-test quality-coverage
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: quality-coverage
-          path: data/quality/
-          if-no-files-found: error
+      - run: make check-contract

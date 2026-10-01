@@ -1,0 +1,66 @@
+[
+  {
+    "operation": "startRun",
+    "kind": "request",
+    "value": {
+      "target": { "kind": "workflow", "workflowId": "review" },
+      "input": { "repository": "acme/app", "limit": 3, "enabled": true }
+    }
+  },
+  {
+    "operation": "startRun",
+    "kind": "request",
+    "value": { "input": [{ "type": "text", "text": "Review this" }] }
+  },
+  {
+    "operation": "startRun",
+    "kind": "response",
+    "status": 202,
+    "value": {
+      "run": {
+        "id": "run-1",
+        "projectId": null,
+        "target": { "kind": "workflow", "workflowId": "review" },
+        "status": "queued",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      },
+      "conversations": []
+    }
+  },
+  {
+    "operation": "getRun",
+    "kind": "response",
+    "status": 200,
+    "value": {
+      "run": {
+        "id": "run-1",
+        "status": "completed",
+        "output": [{ "type": "data", "data": { "findings": 2 } }],
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      }
+    }
+  },
+  {
+    "operation": "startRun",
+    "kind": "response",
+    "status": 400,
+    "value": { "error": { "code": "invalid_input", "message": "Input is invalid" } }
+  },
+  {
+    "operation": "createProject",
+    "kind": "request",
+    "value": { "provisioning": { "kind": "empty" }, "folderName": "review" }
+  },
+  {
+    "operation": "sendMessage",
+    "kind": "request",
+    "value": { "content": [{ "type": "file", "name": "review.txt", "contentBase64": "aGVsbG8=" }] }
+  },
+  {
+    "operation": "createWorkflow",
+    "kind": "request",
+    "value": { "engine": "custom", "specification": { "steps": ["review"] } }
+  }
+]
