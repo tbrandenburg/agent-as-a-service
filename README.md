@@ -4,6 +4,8 @@
 
 Use it as a typed API specification when building an agent backend or client. The contract defines the HTTP surface independently of any provider, database, or server framework.
 
+The Node-RED agents example invokes native `Link In -> flow -> Link Out (return)` workflows: unchanged `run.input` becomes `msg.input`; independent working `msg.payload` returns as schema-validated `run.output` (string or `ContentPart[]`). The worker host owns authenticated invocation, correlation and finalization. Core is a single agent reading `input.text`; managed-v1 keeps its existing definition shape. See the [native runtime acceptance commands](/examples/server-node-red-agents/README.md#native-boundary-acceptance).
+
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
 > This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; [`server-opencode`](examples/server-opencode) runs OpenCode for conversation messages, [`server-node-red`](examples/server-node-red) runs one fixed workflow through a private Node-RED container, and [`server-node-red-agents`](examples/server-node-red-agents) discovers conversations from generic Node-RED agent lifecycle observations.

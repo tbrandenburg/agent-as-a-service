@@ -134,12 +134,18 @@ export async function verified(
     deployed.label !== tab.label
   )
     return false;
-  const nodes = (deployed.nodes ?? []).map((node) => ({
-    ...node,
-    z: "managed-tab",
-  }));
+  const normalized = (nodes: Tab["nodes"]) =>
+    nodes.map(({ wires, z: _tab, ...node }) => ({
+      ...node,
+      // Node-RED omits wires on native return nodes in its Admin API response.
+      wires:
+        node.type === "link out" && node.mode === "return"
+          ? (wires ?? [])
+          : wires,
+    }));
   return (
-    JSON.stringify(nodes) === JSON.stringify(tab.nodes) &&
+    JSON.stringify(normalized(deployed.nodes ?? [])) ===
+      JSON.stringify(normalized(tab.nodes)) &&
     JSON.stringify(deployed.configs ?? []) === JSON.stringify(tab.configs)
   );
 }

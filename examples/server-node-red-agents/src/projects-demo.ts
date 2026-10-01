@@ -215,7 +215,7 @@ const target = { kind: "workflow" as const, workflowId: "node-red-demo" };
 const begin = async (projectId?: string) => {
   const accepted = await startRun(api, {
     target,
-    input: { text: "a project directory" },
+    input: { text: "Run pwd and include its exact output in your reply." },
     ...(projectId ? { projectId } : {}),
   });
   ensure(
@@ -249,7 +249,7 @@ ensure(
 const completed = await Promise.all(ids.map(poll));
 for (const [index, detail] of completed.entries()) {
   ensure(
-    detail.run.status === "completed" && detail.conversations?.length === 3,
+    detail.run.status === "completed" && detail.conversations?.length === 1,
     `workflow completion ${index}: ${JSON.stringify({ status: detail.run.status, error: detail.run.error, conversations: detail.conversations?.length })}`,
   );
   const expected = [
@@ -259,8 +259,9 @@ for (const [index, detail] of completed.entries()) {
     existing.localPath,
   ][index];
   ensure(
-    inspect("ls", [expected]).includes(`aaas-cwd-proof-${detail.run.id}.txt`),
-    `relative core File and JavaScript listing proof for ${detail.run.id}`,
+    typeof detail.run.output === "string" &&
+      detail.run.output.includes(expected),
+    `Core agent cwd for ${detail.run.id}`,
   );
   for (const link of detail.conversations) {
     const messages = await api.conversations.listMessages({
@@ -279,7 +280,7 @@ for (const [index, detail] of completed.entries()) {
     );
   }
   console.log(
-    `Workflow ${detail.run.id} cwd=${expected} conversations=${detail.conversations.length}; Exec pwd, File write and process-relative listing checked`,
+    `Workflow ${detail.run.id} cwd=${expected} conversations=${detail.conversations.length}`,
   );
 }
 const projectless = await begin();
@@ -289,9 +290,8 @@ ensure(
   "projectless workflow",
 );
 ensure(
-  inspect("ls", ["/data/agent-work"]).includes(
-    `aaas-cwd-proof-${projectless}.txt`,
-  ),
+  typeof global.run.output === "string" &&
+    global.run.output.includes("/data/agent-work"),
   "projectless process cwd",
 );
 const globalAgent = await startRun(api, {

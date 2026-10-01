@@ -85,6 +85,7 @@ export const runTarget = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent"), agentId: id }),
   z.object({ kind: z.literal("workflow"), workflowId: id }),
 ]);
+export const runOutput = z.union([z.string(), z.array(contentPart)]);
 export const run = z.object({
   id,
   projectId: id.nullish(),
@@ -93,7 +94,7 @@ export const run = z.object({
   conversationId: id.nullish(),
   status: runStatus,
   input: runInput.optional(),
-  output: z.union([z.string(), z.array(contentPart)]).nullish(),
+  output: runOutput.nullish(),
   error: z
     .object({ code: z.string().min(1), message: z.string().min(1) })
     .nullish(),

@@ -5,7 +5,6 @@ const { mkdtemp, writeFile, rm, symlink, realpath, stat } = require("node:fs/pro
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { randomUUID } = require("node:crypto");
-const { addCoreProbes } = require("./core-probes.js");
 
 const workers = new Map();
 const starting = new Set();
@@ -104,7 +103,7 @@ async function launch(job) {
   const global = await realpath("/data/agent-work");
   const cwd = await realpath(job.cwd);
   if ((cwd !== global && !cwd.startsWith(`${root}/`)) || !(await stat(cwd)).isDirectory()) throw new Error("Working directory outside allowed roots");
-  if (!job.tab || !Array.isArray(job.tab.nodes) || !Array.isArray(job.tab.configs) || typeof job.runId !== "string" || typeof job.path !== "string" || !/^\/(workflow\/agents|managed\/[a-f0-9-]{36}|agent\/writer-agent)$/.test(job.path)) throw new Error("Invalid worker snapshot");
+  if (!job.tab || !Array.isArray(job.tab.nodes) || !Array.isArray(job.tab.configs) || typeof job.runId !== "string" || (job.target ? typeof job.target !== "string" : job.path !== "/agent/writer-agent")) throw new Error("Invalid worker snapshot");
   const dir = await mkdtemp(join(tmpdir(), "aaas-worker-"));
   try {
     await symlink("/data/node_modules", join(dir, "node_modules"));
@@ -112,7 +111,6 @@ async function launch(job) {
     const id = tab.id || randomUUID();
     for (const node of tab.nodes) node.z = id;
     if (tab.nodes.some((node) => ["inject", "cronplus", "trigger", "mqtt in", "tcp in", "websocket in"].includes(node.type))) throw new Error("Background trigger is not supported in worker");
-    if (job.path === "/workflow/agents") addCoreProbes(tab, id);
     const flow = [{ id, type: "tab", label: tab.label }, ...tab.configs, ...tab.nodes,
       { id: "aaas-worker-ready-in", z: id, type: "http in", url: "/ready", method: "get", wires: [["aaas-worker-ready-body"]] },
       { id: "aaas-worker-ready-body", z: id, type: "function", func: "msg.payload={ready:true};return msg;", outputs: 1, wires: [["aaas-worker-ready-response"]] },
@@ -149,7 +147,7 @@ async function launch(job) {
     }
     const activated = await fetch(`http://127.0.0.1:${port}/activate`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(5000) });
     if (!activated.ok) throw new Error("Worker observer could not activate");
-    const response = await fetch(`http://127.0.0.1:${port}${job.path}`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ runId: job.runId, text: job.text, sessionID: job.sessionID }), signal: AbortSignal.timeout(10_000) });
+    const response = await fetch(`http://127.0.0.1:${port}${job.target ? "/invoke" : job.path}`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(job.target ? { runId: job.runId, input: job.input, target: job.target } : { runId: job.runId, text: job.text, sessionID: job.sessionID }), signal: AbortSignal.timeout(10_000) });
     if (response.status !== 202) throw new Error("Worker dispatch rejected");
   } catch (error) {
     await stop(job.runId);

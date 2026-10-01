@@ -1,0 +1,8 @@
+services:
+  node-red:
+    volumes: !override
+      - node-red-data:/data
+      - projects:/data/projects
+      - global-work:/data/agent-work
+    command:
+      - "set -e; cp /seed/settings.js /data/settings.js; cp /seed/flows.json /data/flows.json; node /seed/supervisor.js & exec /usr/src/node-red/entrypoint.sh"

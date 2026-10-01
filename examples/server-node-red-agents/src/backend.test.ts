@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../../server-express/src/index.js";
 import { AgentsBackend } from "./backend.js";
+import type { Executor } from "./backend.js";
 
 const auth = { authorization: "Bearer test-token" };
 const start = (text = "Release notes") => ({
@@ -49,12 +50,7 @@ const done = (runId: string, status = "completed") => ({
   eventId: randomUUID(),
   output: "Final result",
 });
-const setup = (
-  dispatch: (payload: {
-    runId: string;
-    text: string;
-  }) => Promise<void> = async () => {},
-) => {
+const setup = (dispatch: Executor = async () => {}) => {
   const backend = new AgentsBackend(dispatch);
   const app = createApp({
     token: "test-token",
@@ -72,6 +68,58 @@ const run = async (app: ReturnType<typeof setup>["app"], text?: string) => {
 };
 
 describe("Node-RED lifecycle boundary", () => {
+  it("transports contract workflow inputs unchanged and completes non-agent outputs", async () => {
+    const inputs = [
+      "literal",
+      {
+        repository: "acme/app",
+        limit: 3,
+        enabled: true,
+        nested: { flags: [false, 2] },
+      },
+      [{ type: "text", text: "part" }],
+    ];
+    for (const input of inputs) {
+      const dispatched: Parameters<Executor>[0][] = [];
+      const { backend, app } = setup(async (payload) => {
+        dispatched.push(payload);
+      });
+      const accepted = await request(app)
+        .post("/api/v1/runs")
+        .set(auth)
+        .send({ ...start(), input });
+      expect(accepted.status).toBe(202);
+      const id = accepted.body.run.id as string;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(dispatched[0]).toMatchObject({
+        runId: id,
+        input,
+        target: "workflow-in",
+      });
+      expect(dispatched[0].text).toBeUndefined();
+      expect(backend.runs.get(id)?.run.input).toEqual(input);
+      const output = [{ type: "data", data: { accepted: true } }];
+      expect(backend.finalize({ ...done(id), output: {} }).status).toBe(400);
+      expect(backend.finalize({ ...done(id), output }).status).toBe(200);
+      expect(backend.runs.get(id)?.run.output).toEqual(output);
+    }
+  });
+  it("keeps direct agent input text-only", async () => {
+    const { app } = setup();
+    for (const input of [
+      "literal",
+      { text: "prompt", extra: true },
+      [{ type: "text", text: "part" }],
+    ])
+      expect(
+        (
+          await request(app)
+            .post("/api/v1/runs")
+            .set(auth)
+            .send({ target: { kind: "agent", agentId: "writer-agent" }, input })
+        ).status,
+      ).toBe(400);
+  });
   it("stores ordered idempotent node observations separately from provider conversations and finalizer status", async () => {
     const { backend, app } = setup();
     const id = await run(app);
@@ -329,10 +377,10 @@ describe("Node-RED lifecycle boundary", () => {
     expect(next.body.items[0].id).toBe(second);
     expect(backend.observe(node("node.deployed")).status).toBe(200);
     expect(backend.conversations.size).toBe(0);
-    const a = started(first);
-    const b = started(first, randomUUID(), "reviewer-agent");
-    const c = started(first);
-    const other = started(second);
+    const a = started(first, randomUUID(), "step-a");
+    const b = started(first, randomUUID(), "step-b");
+    const c = started(first, randomUUID(), "step-a");
+    const other = started(second, randomUUID(), "step-a");
     const observations = [a, b, c, other];
     const links = observations.map(
       (observation) => backend.observe(observation).body.conversationId!,
@@ -356,7 +404,7 @@ describe("Node-RED lifecycle boundary", () => {
       .body;
     expect(
       snapshot.conversations.map((link: { nodeId: string }) => link.nodeId),
-    ).toEqual(["writer-agent", "reviewer-agent", "writer-agent"]);
+    ).toEqual(["step-a", "step-b", "step-a"]);
     for (const id of links) {
       expect(
         (await request(app).get(`/api/v1/conversations/${id}`).set(auth))

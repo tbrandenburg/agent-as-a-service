@@ -132,72 +132,42 @@ export function tabFor(input: Input, marker: string = randomUUID()): Tab {
   const final = nodes.find(
     (node) => node.id === `${prefix}-${spec.finalizer}`,
   )!;
-  final.wires[0].push(`${prefix}-success`);
-  for (const node of nodes) node.wires[1].push(`${prefix}-failure`);
+  final.wires[0].push(`${prefix}-return`);
+  for (const node of nodes) node.wires[1].push(`${prefix}-return`);
   nodes.push(
     {
       id: `${prefix}-in`,
-      type: "http in",
-      name: "Private dispatch",
-      url: `/managed/${marker}`,
-      method: "post",
+      type: "link in",
+      name: "Private invocation",
+      links: [],
       wires: [[`${prefix}-entry`]],
     },
     {
       id: `${prefix}-entry`,
       type: "function",
-      name: "Accept dispatch",
-      func: `if (msg.req?.headers?.authorization !== 'Bearer '+env.get('INTERNAL_TOKEN')) { msg.statusCode=401; msg.payload={error:'Unauthorized'}; return [null,msg]; } const { runId, text } = msg.payload || {}; if (typeof runId !== 'string' || !runId || typeof text !== 'string' || !text.trim()) { msg.statusCode = 400; msg.payload = {error:'Invalid request'}; return [null,msg]; } const work = {runId, payload:text, agentObservation:{runId}}; msg.statusCode = 202; msg.payload = {accepted:true}; return [work,msg];`,
-      outputs: 2,
-      wires: [[`${prefix}-${spec.entry}`], [`${prefix}-response`]],
+      name: "managed-v1 text compatibility",
+      func: `if (typeof msg.input?.text !== 'string' || !msg.input.text.trim()) { node.error('managed-v1 requires input.text', msg); return null; } msg.payload=msg.input.text; return msg;`,
+      outputs: 1,
+      wires: [[`${prefix}-${spec.entry}`]],
     },
     {
-      id: `${prefix}-response`,
-      type: "http response",
-      name: "Dispatch response",
+      id: `${prefix}-return`,
+      type: "link out",
+      name: "Return workflow result",
+      mode: "return",
+      links: [],
       wires: [],
-    },
-    {
-      id: `${prefix}-success`,
-      type: "function",
-      name: "Finalize success",
-      func: `if (msg.agentExecution?.status !== 'completed' || typeof msg.payload !== 'string' || !msg.payload.trim()) return [null,msg]; msg.payload = {runId:msg.runId,eventId:msg.runId+':completed',status:'completed',output:msg.payload}; return [msg,null];`,
-      outputs: 2,
-      wires: [[`${prefix}-headers`], [`${prefix}-failure`]],
     },
     {
       id: `${prefix}-catch`,
       type: "catch",
       name: "Catch failures",
-      scope: spec.nodes.map((node) => `${prefix}-${node.id}`),
+      scope: [
+        ...spec.nodes.map((node) => `${prefix}-${node.id}`),
+        `${prefix}-entry`,
+      ],
       uncaught: false,
-      wires: [[`${prefix}-failure`]],
-    },
-    {
-      id: `${prefix}-failure`,
-      type: "function",
-      name: "Finalize failure",
-      func: `if (typeof msg.runId !== 'string' || !msg.runId) { node.warn('Uncorrelated failure'); return null; } msg.payload = {runId:msg.runId,eventId:msg.runId+':failed',status:'failed'}; return msg;`,
-      outputs: 1,
-      wires: [[`${prefix}-headers`]],
-    },
-    {
-      id: `${prefix}-headers`,
-      type: "function",
-      name: "Private finalizer",
-      func: `msg.method='POST'; msg.url='http://api:3095/finalize'; msg.headers={authorization:'Bearer '+env.get('INTERNAL_TOKEN'),'content-type':'application/json'}; return msg;`,
-      outputs: 1,
-      wires: [[`${prefix}-request`]],
-    },
-    {
-      id: `${prefix}-request`,
-      type: "http request",
-      name: "Authenticated finalizer",
-      method: "use",
-      ret: "obj",
-      paytoqs: "ignore",
-      url: "",
-      wires: [[]],
+      wires: [[`${prefix}-return`]],
     },
   );
   return {
@@ -215,4 +185,4 @@ export function tabFor(input: Input, marker: string = randomUUID()): Tab {
 
 export const markerOf = (tab: Tab) =>
   /^AaaS managed ([a-f0-9-]{36})$/.exec(tab.info)?.[1];
-export const entryOf = (tab: Tab) => `/managed/${markerOf(tab)}`;
+export const entryOf = (tab: Tab) => `aaas-${markerOf(tab)}-in`;
