@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { schemas } from "@agent-as-a-service/contract";
 import type { z } from "zod";
-import type { Admin, Store } from "./admin.js";
-import { verified } from "./admin.js";
-import { entryOf, tabFor, validate } from "./managed.js";
-import type { Definition, Input, Registry } from "./managed.js";
-import type { Tab } from "./managed.js";
+import type { Store } from "./registry.js";
+import { snapshot, validate } from "./native.js";
+import type { Definition, Input, Registry, Specification } from "./native.js";
 import { Projects, ProjectError } from "./projects.js";
 import { notImplementedRoutes } from "../../server-express/src/index.js";
 import type { ApiImplementation } from "../../server-express/src/index.js";
@@ -68,28 +66,15 @@ export type Executor = (payload: {
   target?: string;
   path: string;
   cwd?: string;
-  tab?: Tab;
+  flows: Record<string, unknown>[];
   sessionID?: string;
 }) => Promise<void>;
 
 export class WorkerCapacityError extends Error {}
 
-const workflow: z.infer<typeof schemas.definition> = {
-  id: "node-red-demo",
-  name: "Core",
-  engine: "node-red",
-  specificationVersion: "5.x",
-  specification: { entry: "workflow-in" },
-  version: 1,
-  readOnly: true,
-  createdAt: new Date().toISOString(),
-};
-const directTab = (): Tab => ({
-  id: "direct-tab",
-  label: "Direct writer",
-  info: "Private direct invocation",
-  configs: [],
-  nodes: [
+const directFlows = (): Record<string, unknown>[] =>
+  [
+    { id: "direct-tab", type: "tab", label: "Direct writer" },
     {
       id: "direct-in",
       type: "http in",
@@ -148,8 +133,11 @@ const directTab = (): Tab => ({
       wires: [[]],
     },
     { id: "direct-response", type: "http response", wires: [] },
-  ],
-});
+  ].map((node, index) =>
+    node.type === "tab"
+      ? node
+      : { ...node, z: "direct-tab", x: 100 + index * 80, y: 100 },
+  );
 const missing = (name: string) => ({
   status: 404 as const,
   body: { error: { code: "not_found", message: `${name} was not found` } },
@@ -226,12 +214,10 @@ export class AgentsBackend {
     { body: string; response: Detail; expires: number }
   >();
   private registry: Registry = {};
-  private readonly unavailable = new Set<string>();
   private mutation = Promise.resolve();
 
   constructor(
     private readonly dispatch: Executor,
-    private readonly admin?: Admin,
     private readonly store?: Store,
     private readonly projects?: Projects,
     private readonly stopWorker?: (id: string) => Promise<void>,
@@ -240,16 +226,7 @@ export class AgentsBackend {
 
   async initialize(): Promise<void> {
     await this.projects?.initialize();
-    if (!this.admin || !this.store) return;
-    this.registry = await this.store.load();
-    for (const [id, entry] of Object.entries(this.registry)) {
-      try {
-        if (!(await verified(this.admin, id, entry.tab)))
-          this.unavailable.add(id);
-      } catch {
-        this.unavailable.add(id);
-      }
-    }
+    if (this.store) this.registry = await this.store.load();
   }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -262,94 +239,42 @@ export class AgentsBackend {
   }
 
   private definition(id: string): Definition | undefined {
-    if (id === workflow.id) return workflow;
-    if (this.unavailable.has(id)) return undefined;
-    return this.registry[id]?.definition;
-  }
-
-  private active(id: string): boolean {
-    return [...this.jobs.values()].some(
-      ({ run }) =>
-        run.target?.kind === "workflow" &&
-        run.target.workflowId === id &&
-        ["queued", "running", "paused"].includes(run.status),
-    );
+    return Object.hasOwn(this.registry, id) ? this.registry[id] : undefined;
   }
 
   private guard(id: string, match?: string) {
-    if (id === workflow.id)
-      return errorResponse(403, "forbidden", "Core is read-only");
-    const entry = this.registry[id];
+    const entry = this.definition(id);
     if (!entry) return missing("Workflow");
-    if (this.unavailable.has(id))
-      return errorResponse(
-        503,
-        "workflow_unavailable",
-        "Workflow deployment is unavailable",
-      );
-    if (match && match !== `"v${entry.definition.version}"`)
+    if (match && match !== `"v${entry.version}"`)
       return errorResponse(
         412,
         "precondition_failed",
         "Workflow version has changed",
       );
-    if (this.active(id))
-      return errorResponse(409, "workflow_active", "Workflow has active runs");
     return null;
   }
 
   private async create(input: Input) {
     const errors = validate(input);
     if (errors.length) return invalid(errors.join("; "));
-    if (!this.admin || !this.store)
-      return errorResponse(
-        503,
-        "workflow_unavailable",
-        "Workflow administration unavailable",
-      );
-    const tab = tabFor(input);
-    let id: string;
-    let deployed = false;
+    const id = randomUUID();
     try {
-      id = await this.admin.create(tab);
-      deployed = true;
-    } catch {
-      return errorResponse(
-        503,
-        "deployment_failed",
-        "Node-RED deployment failed",
-      );
-    }
-    try {
-      if (!(await verified(this.admin, id, tab)))
-        throw new Error("Deployed tab differs");
       const definition: Definition = {
-        name: input.name ?? tab.label,
-        description: input.description,
-        engine: "node-red",
-        specificationVersion: "managed-v1",
-        specification: input.specification,
+        ...structuredClone(input),
+        name: input.name ?? "Workflow",
         id,
         version: 1,
         readOnly: false,
         createdAt: new Date().toISOString(),
       };
-      const next = { ...this.registry, [id]: { definition, tab } };
-      await this.store.save(next);
+      const next = { ...this.registry, [id]: definition };
+      await this.store?.save(next);
       this.registry = next;
       return { status: 201 as const, body: definition };
     } catch {
-      if (deployed) {
-        try {
-          await this.admin.delete(id);
-          if (await this.admin.get(id)) throw new Error("Cleanup failed");
-        } catch {
-          this.unavailable.add(id);
-        }
-      }
       return errorResponse(
         503,
-        "deployment_failed",
+        "registry_failed",
         "Workflow could not be committed",
       );
     }
@@ -360,55 +285,20 @@ export class AgentsBackend {
     if (guarded) return guarded;
     const errors = validate(input);
     if (errors.length) return invalid(errors.join("; "));
-    if (!this.admin || !this.store)
-      return errorResponse(
-        503,
-        "workflow_unavailable",
-        "Workflow administration unavailable",
-      );
     const old = this.registry[id];
-    // Keep the private ingress stable across replacements of the same workflow.
-    const marker = old.tab.info.replace("AaaS managed ", "");
-    const tab = tabFor(input, marker);
-    try {
-      await this.admin.update(id, tab);
-      if (!(await verified(this.admin, id, tab)))
-        throw new Error("Deployed tab differs");
-    } catch {
-      try {
-        if (!(await verified(this.admin, id, old.tab))) {
-          await this.admin.update(id, old.tab);
-          if (!(await verified(this.admin, id, old.tab)))
-            throw new Error("Restore failed");
-        }
-      } catch {
-        this.unavailable.add(id);
-      }
-      return errorResponse(
-        503,
-        "deployment_failed",
-        "Node-RED deployment failed",
-      );
-    }
     const definition: Definition = {
-      ...old.definition,
-      name: input.name ?? tab.label,
-      description: input.description,
-      specification: input.specification,
-      version: old.definition.version + 1,
+      ...structuredClone(input),
+      id,
+      createdAt: old.createdAt,
+      readOnly: false,
+      name: input.name ?? old.name,
+      version: old.version + 1,
     };
     try {
-      const next = { ...this.registry, [id]: { definition, tab } };
-      await this.store.save(next);
+      const next = { ...this.registry, [id]: definition };
+      await this.store?.save(next);
       this.registry = next;
     } catch {
-      try {
-        await this.admin.update(id, old.tab);
-        if (!(await verified(this.admin, id, old.tab)))
-          throw new Error("Restore failed");
-      } catch {
-        this.unavailable.add(id);
-      }
       return errorResponse(
         503,
         "registry_failed",
@@ -421,30 +311,11 @@ export class AgentsBackend {
   private async remove(id: string) {
     const guarded = this.guard(id);
     if (guarded) return guarded;
-    if (!this.admin || !this.store)
-      return errorResponse(
-        503,
-        "workflow_unavailable",
-        "Workflow administration unavailable",
-      );
-    try {
-      await this.admin.delete(id);
-      if (await this.admin.get(id)) throw new Error("Tab still present");
-    } catch {
-      this.unavailable.add(id);
-      return errorResponse(
-        503,
-        "deployment_failed",
-        "Node-RED deletion could not be confirmed",
-      );
-    }
-    this.unavailable.add(id);
     try {
       const next = { ...this.registry };
       delete next[id];
-      await this.store.save(next);
+      await this.store?.save(next);
       this.registry = next;
-      this.unavailable.delete(id);
       return { status: 200 as const, body: { success: true } };
     } catch {
       return errorResponse(
@@ -955,7 +826,7 @@ export class AgentsBackend {
     input: z.infer<typeof schemas.runInput>,
     path: string,
     cwd?: string,
-    tab?: Tab,
+    flows: Specification["flows"] = [],
     sessionID?: string,
   ) {
     try {
@@ -966,7 +837,7 @@ export class AgentsBackend {
           : { input, target: path }),
         path,
         cwd,
-        tab,
+        flows,
         sessionID,
       });
       // A start can arrive before the dispatch response.
@@ -1080,12 +951,7 @@ export class AgentsBackend {
         ...notImplementedRoutes.workflows,
         listWorkflows: async ({ query }) => {
           const page = this.page(
-            [
-              workflow,
-              ...Object.entries(this.registry)
-                .filter(([id]) => !this.unavailable.has(id))
-                .map(([, entry]) => entry.definition),
-            ],
+            Object.values(this.registry),
             query.cursor,
             query.limit,
           );
@@ -1093,14 +959,7 @@ export class AgentsBackend {
         },
         getWorkflow: async ({ params, res }) => {
           const definition = this.definition(params.workflowId);
-          if (!definition)
-            return this.unavailable.has(params.workflowId)
-              ? errorResponse(
-                  503,
-                  "workflow_unavailable",
-                  "Workflow deployment is unavailable",
-                )
-              : missing("Workflow");
+          if (!definition) return missing("Workflow");
           res.setHeader("ETag", `"v${definition.version}"`);
           return { status: 200, body: definition };
         },
@@ -1183,13 +1042,7 @@ export class AgentsBackend {
                 ? this.definition(body.target.workflowId)
                 : undefined;
             if (body.target.kind === "workflow" && !definition)
-              return this.unavailable.has(body.target.workflowId)
-                ? errorResponse(
-                    503,
-                    "workflow_unavailable",
-                    "Workflow deployment is unavailable",
-                  )
-                : missing("Workflow");
+              return missing("Workflow");
             const prior =
               body.conversationId &&
               this.conversations.get(body.conversationId);
@@ -1219,18 +1072,10 @@ export class AgentsBackend {
                 "conversation_directory_conflict",
                 "OpenCode continuation requires the original working directory",
               );
-            const tab =
+            const accepted =
               body.target.kind === "agent"
-                ? directTab()
-                : definition!.id === workflow.id
-                  ? await this.admin?.get("agents-tab")
-                  : structuredClone(this.registry[definition!.id].tab);
-            if (this.projects && !tab)
-              return errorResponse(
-                503,
-                "workflow_unavailable",
-                "Workflow snapshot unavailable",
-              );
+                ? { entry: "/agent/writer-agent", flows: directFlows() }
+                : snapshot(definition!);
             const now = new Date().toISOString();
             const run: Run = {
               id: randomUUID(),
@@ -1279,12 +1124,7 @@ export class AgentsBackend {
                 expires: Date.now() + 86_400_000,
               });
             this.update(run, "running");
-            const path =
-              body.target.kind === "agent"
-                ? "/agent/writer-agent"
-                : definition!.id === workflow.id
-                  ? "workflow-in"
-                  : entryOf(this.registry[definition!.id].tab);
+            const path = accepted.entry;
             const sessionID = body.conversationId
               ? this.sessions.get(body.conversationId)
               : undefined;
@@ -1295,7 +1135,7 @@ export class AgentsBackend {
                   body.input!,
                   path,
                   cwd,
-                  tab ?? undefined,
+                  accepted.flows,
                   sessionID,
                 ),
             );

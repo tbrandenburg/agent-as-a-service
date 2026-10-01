@@ -1,106 +1,104 @@
-# Lifecycle-observed Node-RED agents example
+# Native Node-RED workflows and observed agents
 
-Run `make install && API_TOKEN=dev-token make demo-node-red-agents` from the root. The demo requires at least 4 GiB free on Docker's storage filesystem before building; it creates a unique disposable Compose project, discovers its Docker-assigned loopback API port, runs the typed walkthrough and removes its own containers, volumes and project images on exit, including after a failed build. Only the API is published on `127.0.0.1` at a dynamic port; Node-RED's admin and HTTP ports and the authenticated callback listener on 3095 stay inside the Compose network. Use distinct `INTERNAL_TOKEN` and `NODE_RED_ADMIN_TOKEN` to override the demo credentials. Node-RED's Admin API accepts only its private bearer credential with `flows.read`/`flows.write`; worker-host invocation and finalization use the separate internal callback credential. Node-RED 5.0.7 installs exactly `@tbrandenburg/node-red-agents@0.4.3` and OpenCode CLI 1.18.33 and extracts the unchanged host adapter from `@tbrandenburg/node-red-cli@0.2.18`; outbound model access is needed for the provider walkthrough.
+This example stores native Node-RED definitions and runs each accepted invocation in a private, bounded Node-RED worker. Workflow CRUD needs only the atomic JSON registry; there is no shared editor/definition runtime or Admin deployment.
 
-The launcher creates an optional repo-root `.home/` directory if absent. Place trusted home-relative files there before starting instances, for example `.home/.config/opencode/opencode.jsonc` and `.home/.local/share/opencode/auth.json`. The directory is ignored by Git and excluded from Docker builds; it is mounted read-only on the Node-RED service and recursively copied (including hidden files) into the `node-red` user's `$HOME` (`/usr/src/node-red`) on every container startup. Each instance writes to its own copy; changes in the container do not sync back to the shared seed. The API container never mounts it. Do not put secrets in committed files or display credential contents. To list available authenticated providers without printing their credentials, run `docker compose -p aas-node-red-agents-<name> -f examples/server-node-red-agents/compose.yaml exec node-red opencode auth list` after a named instance starts.
+## Run
 
-Set `DEFAULT_MODEL=provider/model` on the operator's `make start-node-red-agents` or `make demo-node-red-agents` command to select the model for Core, managed, and direct agents; omitted defaults to `opencode/big-pickle`, and an explicitly empty value is rejected. The model is resolved from the Node-RED environment, not supplied by API callers. For example: `DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=... INTERNAL_TOKEN=... NODE_RED_ADMIN_TOKEN=... make start-node-red-agents INSTANCE=alpha`. Choose a model available to the authenticated provider; changing the setting requires recreating the instance's containers (`stop` then `start`).
-
-For persistent, independent pairs, provide different public, callback and Admin tokens for each instance; the three tokens within each pair must also be distinct. Spawn without choosing a name, or start named pairs from the repository root:
+From the repository root:
 
 ```sh
-API_TOKEN="${ALPHA_API_TOKEN:?}" INTERNAL_TOKEN="${ALPHA_INTERNAL_TOKEN:?}" NODE_RED_ADMIN_TOKEN="${ALPHA_ADMIN_TOKEN:?}" make spawn-node-red-agents
-API_TOKEN="${ALPHA_API_TOKEN:?}" INTERNAL_TOKEN="${ALPHA_INTERNAL_TOKEN:?}" NODE_RED_ADMIN_TOKEN="${ALPHA_ADMIN_TOKEN:?}" make start-node-red-agents INSTANCE=alpha
-API_TOKEN="${BETA_API_TOKEN:?}" INTERNAL_TOKEN="${BETA_INTERNAL_TOKEN:?}" NODE_RED_ADMIN_TOKEN="${BETA_ADMIN_TOKEN:?}" make start-node-red-agents INSTANCE=beta
+make install
+DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=dev-token make demo-node-red-agents
+```
+
+The disposable demo checks Docker storage (at least 4 GiB free), builds a unique Compose project, discovers its dynamic loopback API port, runs native HTTP acceptance and real-provider/session acceptance, then removes its own containers, volumes and project images. Only the public API is published; the supervisor and authenticated callback listener stay on the Compose network. Node-RED 5.0.7 installs `@tbrandenburg/node-red-agents@0.4.3` and OpenCode CLI 1.18.33. The native host Link Call implementation is extracted from the integrity-verified `@tbrandenburg/node-red-cli@0.2.18` tarball at build time, avoiding its unused dependency tree. Extraction removes the CLI's single-tab/static-wire preflight, which cannot follow native cross-tab Links/subflows; invocation, first-return handling and cleanup retain upstream semantics. Runtime lookup and bounded timeout own invalid-target failures.
+
+The optional gitignored root `.home/` seed is mounted read-only and copied into the Node-RED container user's home on startup, including hidden files. For authenticated providers, place trusted home-relative configuration there, such as `.home/.config/opencode/opencode.jsonc` and `.home/.local/share/opencode/auth.json`. The API never mounts this seed; container changes never sync back. Never display credential contents. `opencode auth list` inside your instance lists provider names without credentials. OpenCode storage is initialized during image build.
+
+`DEFAULT_MODEL=provider/model` selects the model for environment-configured agent nodes; omission defaults to `opencode/big-pickle`, and empty values are rejected. Provider acceptance uses `github-copilot/gpt-6-luna`. Recreate the instance after changing the model.
+
+Persistent independent instances require distinct public and internal tokens:
+
+```sh
+DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN="${PUBLIC_TOKEN:?}" INTERNAL_TOKEN="${CALLBACK_TOKEN:?}" make spawn-node-red-agents
+DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN="${PUBLIC_TOKEN:?}" INTERNAL_TOKEN="${CALLBACK_TOKEN:?}" make start-node-red-agents INSTANCE=alpha
 make status-node-red-agents INSTANCE=alpha
-make status-node-red-agents INSTANCE=beta
 make logs-node-red-agents INSTANCE=alpha
 make stop-node-red-agents INSTANCE=alpha
 make cleanup-node-red-agents INSTANCE=alpha
-make cleanup-node-red-agents INSTANCE=beta
 ```
 
-Set the token variables in your shell or supply them per command; never check credentials into the repository. Names are lowercase letters, digits and hyphens, start with a letter and are at most 40 characters (`demo-*` is reserved). `spawn` generates an `aaas-` name and checks existing containers, networks and retained volumes before invoking `start`; it prints the name, Compose project, assigned URL, and status/logs/stop/cleanup commands. Save the printed name for later commands. Each `start` prints its project name and current URL; `status` looks up the URL via `docker compose port api 3094`. Use `Authorization: Bearer <that instance's API_TOKEN>` for its API. Starting an existing instance fails instead of replacing it. `stop` removes only the selected project's containers/network and retains its Compose volumes; `cleanup` also deletes those volumes. Restart a stopped instance with the same name and credentials; Docker may assign a new URL. Managed tabs and registry survive `stop`, but run/session histories do not survive an API restart: they are process-local. Separate projects have private service DNS, data volumes and state; scaling a single service within a project is unsupported.
+Names start with a lowercase letter, use lowercase letters/digits/hyphens and have at most 40 characters; `demo-*` is reserved. Spawn checks project-name collisions and prints lifecycle commands. Start refuses an existing running instance. Stop retains volumes; cleanup removes the selected project's volumes. Restart may assign a new API URL. Workflow definitions and project registries persist, but run/conversation histories and session mappings are in-memory and disappear when the API restarts.
 
-The runtime `settings.js` forwards generic `node.deployed`, `node.closed`, `execution.started`, and `execution.terminal` records to private Express `/observations` using the internal token. Failed terminal records log only the node ID and error category/exit metadata, without prompts, provider messages or credentials. Deployed notices update a generation-aware inventory; execution starts repair missed notices. Core is `Link In -> one agent -> Link Out(return)`, with native Catch/error-return wiring. Its agent reads `msg.input.text` directly via `promptType: msg`; it creates one conversation. The worker host passes unchanged string/object/`ContentPart[]` input in `msg.input` and only `{runId}` in `msg.agentObservation`. `msg.payload` is independent working state. The full returned message stays internal: only its payload, validated with the contract's shared `runOutput`, becomes public output. Unsupported payloads and node failures produce `workflow_failed`. Returned message IDs/status never select the run. Host-owned `/invoke` authenticates, validates the envelope and acknowledges `202` before Link Call settles; the host then reports to private `/finalize`. Workflow nodes contain no callback URL/token. Concurrency is four per node; isolated workers retain the 450-second deadline and process-group cleanup. The image initializes OpenCode storage at build time.
+## Native workflow API
 
-## Worker diagnostics
-
-Core contains no working-directory probes. The dedicated native test fixture exercises Exec, File, and process-relative listing while preserving its invocation input.
-
-Set `NODE_RED_WORKER_METRICS=true` when starting the Compose instance (for example, `NODE_RED_WORKER_METRICS=true API_TOKEN=dev-token make demo-node-red-agents` or `NODE_RED_WORKER_METRICS=true API_TOKEN=... INTERNAL_TOKEN=... NODE_RED_ADMIN_TOKEN=... make start-node-red-agents INSTANCE=alpha`). The default is `false`; only per-run workers enable Node-RED's native `logging.console.metrics`, not the definition/editor runtime. Stop and start a named instance to change the setting. Node-RED logs native per-node receive/send metrics with `nodeid`, `msgid`, `event` and `timestamp` (and periodic memory metrics). Receive/send indicates activity, not completion or success.
-
-For a named instance, find the run ID from the `POST /api/v1/runs` response or `GET /api/v1/runs`, then inspect its worker lines in the Node-RED container logs:
-
-```sh
-RUN_ID=<run-id>
-docker compose -p aas-node-red-agents-alpha -f examples/server-node-red-agents/compose.yaml logs --no-log-prefix node-red | grep -F "[worker runId=$RUN_ID]"
-curl -H "Authorization: Bearer $API_TOKEN" "$BASE_URL/api/v1/runs/$RUN_ID/events?after=0"
-curl -H "Authorization: Bearer $API_TOKEN" "$BASE_URL/api/v1/runs/$RUN_ID"
-```
-
-Use the project name printed by `make start-node-red-agents` and its URL from `make status-node-red-agents INSTANCE=alpha` as `BASE_URL`. Worker stdout and stderr each retain the original Node-RED log line after the `[worker runId=...]` prefix, including native metric/error fields. Compare the node IDs and sequence of receive/send lines with the existing agent terminal and finalizer events and the final run status; no metrics are added to the API. Disposable demo logs disappear when the Compose project is removed, so retain relevant sanitized lines before cleanup when investigating a failure.
-
-Start workflow `node-red-demo` with `input: { "text": "..." }`. Its `202` response contains `conversations: []`; each acknowledged execution start adds `{nodeId, conversationId}` to `GET /api/v1/runs/{runId}`. A repeated node ID can have multiple distinct links in other workflows. To discover retained histories, page through `GET /api/v1/runs`, then fetch each run detail and each linked conversation/messages. Complete messages and ordered conversation events are committed on acknowledged observations; the run remains `running` until Link Call settles and the host finalizes it. A rejected or timed-out start can leave a late attempted-input commit; failure retains that history without fabricated assistant text. If finalization fails, the worker stops and the supervisor reports failure. Restarting the disposable in-memory backend loses inventory, run history, and callback deduplication state.
-
-Each private run worker installs Node-RED 5.0.7 `onReceive`, `onComplete` and `onSend` hooks before loading its snapshot. `runDetail.executions` starts at `[]` and gains one opaque ID per received message/node invocation, with `key` equal to the snapshot node ID. `running` means received; `completed` and `failed` require a matching `done()` callback (including `done(error)`). Missing `done()` and unmatched completions end `unconfirmed`, which implies neither success nor failure. When the exact same message object is delivered concurrently to the same node, the public hooks cannot pair completions unambiguously; those invocations remain unconfirmed. Source-only emissions generate `node.sent` run events without fabricated successful executions. Ordered `node.received`, `node.completed`, `node.unconfirmed` and `observation.incomplete` events carry only IDs/status or bounded reason codes, never message payloads. Callback interruption or a worker crash can leave a partial trace, signaled by `observation.incomplete`. Generic node executions are separate from provider-specific `execution.started`/`execution.terminal` conversation events and do not set `run.status`; only the finalizer does. Run and observation history are in-memory and disappear when the API restarts. The same worker observer is used for Core, direct agent, and API-registered or updated managed workflows without modifying their flow JSON.
-
-## Managed workflows
-
-The stable `node-red-demo` workflow is displayed as **Core** and is read-only. `POST /api/v1/workflows`, `PUT /api/v1/workflows/{id}` and `DELETE /api/v1/workflows/{id}` manage individual runnable Node-RED tabs. A managed workflow uses `engine: "node-red"`, `specificationVersion: "managed-v1"` and the following JSON definition (submit the same body to `/api/v1/workflows/validate` for a dry run):
+Submit complete editor flow JSON with the explicit public Link In entry:
 
 ```json
 {
+  "name": "Multiply",
   "engine": "node-red",
-  "specificationVersion": "managed-v1",
   "specification": {
-    "label": "My writer",
-    "entry": "writer",
-    "finalizer": "writer",
-    "configs": [],
-    "nodes": [
-      { "id": "writer", "type": "agent", "name": "Writer", "wires": [[], []] }
+    "entry": "entry",
+    "flows": [
+      { "id": "main", "type": "tab", "label": "Main" },
+      { "id": "entry", "z": "main", "type": "link in", "x": 100, "y": 100, "wires": [["multiply"]] },
+      { "id": "multiply", "z": "main", "type": "function", "x": 250, "y": 100, "outputs": 1, "func": "msg.payload=msg.input.a*msg.input.b;return msg;", "wires": [["return"]] },
+      { "id": "return", "z": "main", "type": "link out", "x": 400, "y": 100, "mode": "return", "links": [] }
     ]
   }
 }
 ```
 
-Each workflow is exactly one tab. `entry` identifies the first agent and `finalizer` the last successful agent. `wires` are native output-port target IDs; the first port carries successes and the second errors. Definition validation and accepted fields/node types are unchanged. Runtime generation creates one Link In, a profile-local compatibility Function copying `msg.input.text` to `msg.payload`, the existing agent graph, and a Link Out(return) on finalizer success (plus native failure return plumbing). Node IDs must be distinct simple identifiers. Only installed `agent` nodes with `id`, `type`, `name`, `wires` are accepted; `configs` must be empty. User JavaScript, credentials, subflows and endpoints remain rejected. The graph owns ordering; native flows own aggregation when needed. The host enforces the worker deadline.
+`POST /api/v1/workflows/validate` validates only `engine`, an object specification, nonempty `entry`, a nonempty object array `flows`, and exactly one matching entry whose type is `link in`. Node-RED owns graph and node semantics. Multiple tabs/Link In nodes, subflows, config nodes, arbitrary installed/community nodes and startup/background nodes are supported without a node-type policy. Workflow authors are trusted. Complete editor exports do not carry separate Node-RED credential state; environment-backed/native external configuration remains available.
 
-## Native boundary acceptance
+Create returns `201`, an opaque AaaS workflow ID independent of tab IDs, and strong `ETag: "v1"`. GET and PUT return the current `"vN"`; optional `If-Match` on PUT rejects stale versions with `412`. Update/delete succeed while older runs are active. Acceptance clones the exact native definition, records `run.workflowVersion`, and writes the complete `flows` array unchanged to the worker: no generated nodes or ID/`z`/wire rewriting. Deletion leaves historical runs readable until API restart.
 
-The credential-free Docker HTTP walkthrough is `bash examples/server-node-red-agents/native-acceptance.sh`. It builds fresh production images and uses dynamic loopback API ports, validates the public REST path with native non-agent flows, restores Core, then removes its own Compose resources and images. It needs no `.home` seed or provider calls. `make demo-node-red-agents` runs this native HTTP acceptance before its provider-backed Core/managed walkthrough and also inspects the generated managed tab for native Link nodes and absence of HTTP infrastructure.
+Start with:
 
-Primary sources: [Node-RED 5 release](https://nodered.org/blog/2026/06/09/version-5-0-released), [Link Call documentation](https://nodered.org/docs/user-guide/writing-functions#calling-link-nodes), and [upstream host adapter](https://github.com/tbrandenburg/node-red-cli/blob/main/src/link-call.js). Direct installation of `@tbrandenburg/node-red-cli@0.2.18` brings an unused second Node-RED/npm dependency tree with vulnerable bundled dependencies. During image build, `extract-link-caller.cjs` downloads the pinned published tarball, verifies its npm SHA-512 integrity, and extracts its unchanged `src/link-call.js` and MIT license. The host requires that file's `createHostLinkCaller`; private `_linkSource` assumptions remain solely in the upstream adapter. There is no local adapter implementation or runtime download. Tests use the same extracted bytes and image-native Node-RED 5.0.7. The contract schema is bundled from its TypeScript source into the worker image with esbuild; no output-shape copy is maintained.
-
-Run credential-free real-runtime acceptance from the repository root:
-
-Use Docker for an isolated dependency installation and the pinned native runtime.
-
-`make test-native-node-red-agents` builds, runs and removes a unique test image.
-CI runs this provider-free acceptance only for relevant example/contract/dependency
-changes. Real-provider walkthroughs remain manual adapter acceptance.
-
-```sh
-docker build -f examples/server-node-red-agents/node-red/Dockerfile.native-test -t aaas-native-test .
-docker run --rm --network none aaas-native-test
-docker image rm aaas-native-test
+```json
+{
+  "target": { "kind": "workflow", "workflowId": "<created-id>" },
+  "input": { "a": 13.75, "b": -8 }
+}
 ```
 
-The suite executes real Node-RED 5.0.7 and real worker processes, verifying typed input preservation, payload independence, full internal returns, output validation, authenticated asynchronous acceptance, forged lifecycle fields, correlation, preflight failures, timeout, shutdown and worker crash. Exec/File/custom-node cwd proof is isolated in `/examples/server-node-red-agents/node-red/fixtures/cwd.json`, never injected into Core. For provider-backed acceptance, seed `.home` and run `DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=dev-token make demo-node-red-agents`; the updated walkthrough expects one Core conversation and runs unchanged-shape managed CRUD. Run `/examples/server-node-red-agents/src/projects-demo.ts` against a fresh named instance to verify project cwd and direct continuation (see project instructions below).
+`202` means the run is immediately readable. The host invokes the selected native Link In with unchanged `msg.input` and `msg.agentObservation: {runId}`. `msg.payload` is independent working state. A native Link Out(return) completes the upstream Link Call; its first-return semantics remain authoritative. Only returned `msg.payload` becomes public output. JSON strings, finite numbers, booleans, null, objects and arrays preserve their types (the example returns numeric `-110`). Buffer, function, undefined, cycles and other non-JSON payloads explicitly fail; they are never stringified/coerced. Returned lifecycle fields do not control AaaS status or identity.
 
-Creation returns the Node-RED tab ID and strong `ETag: "v1"`; GET and updates return the current `"vN"`. Optionally use `If-Match: "vN"` on PUT; a stale version returns `412` without deployment. PUT/DELETE reject active runs with `409`; Core mutation returns `403`. Created tabs and the atomic JSON registry are stored in separate per-Compose-project writable volumes and reconciled at startup; missing/mismatched tabs are hidden from the runnable list and return `503` by ID. Removing a workflow does not remove in-memory run/conversation history, but restarting the in-memory API does. `docker compose down -v` removes the disposable definitions. The typed demo uses `DEMO_BASE_URL` and fails nonzero if its real-model managed CRUD/run checks fail.
+Runtime load errors, missing/disabled entries, unreachable returns, node errors and timeouts become failed runs asynchronously. Readiness is a host route available after `flows:started`, outside user flow JSON. No agent conversation is needed for a native non-agent workflow.
 
-## Projects and per-run working directories
+## Acceptance
 
-`MAX_WORKERS` configures the instance-wide worker-process limit (default `4`, integer 1–32) in both API and supervisor. This is a demo resource policy, not a contract or Node-RED limit, and is separate from the per-agent-node concurrency of four. Workers occupy slots until process exit and temporary directory cleanup. Each worker runs in its own process group so its spawned model CLI is also terminated on worker shutdown or crash. A replacement accepted while a completed run's worker stops waits up to 20 seconds for cleanup; if cleanup stalls it fails with `worker_capacity_timeout`, distinct from worker startup failure (`dispatch_failed`). Fully active capacity returns `503 workers_busy` before acceptance.
+```sh
+make test-native-node-red-agents
+bash examples/server-node-red-agents/native-acceptance.sh
+DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=dev-token make demo-node-red-agents
+```
 
-The example keeps a single-writer, atomically written project registry and working directories in a Compose-project-scoped `/data/projects` volume shared between the API and Node-RED containers. `POST /api/v1/projects` accepts `{}` (new empty directory without `git init`), `{ "provisioning": { "kind": "empty" }, "folderName": "safe-name" }`, `{ "provisioning": { "kind": "clone", "repositoryUrl": "https://github.com/octocat/Hello-World.git" }, "folderName": "chosen-name" }`, or `{ "provisioning": { "kind": "existing", "localPath": "/data/projects/previous" } }`. Legacy top-level `repositoryUrl` and/or `localPath` remain accepted; supplying both registers the existing path and records the remote as metadata. The clone mode accepts public HTTPS GitHub URLs only. `folderName` must be an unused, safe, single segment under `/data/projects`; the default is an opaque project ID. The display name is independent of the folder. Existing paths must resolve to directories under the mounted project root; arbitrary host paths and symlink escapes are rejected. The root is not exposed on the host. Operators can create an existing path inside the volume using `docker compose -p <instance-project> -f examples/server-node-red-agents/compose.yaml exec node-red mkdir -p /data/projects/previous`.
+The provider-free HTTP script builds production images without a home seed and records statuses, ETags, opaque workflow/run IDs, versions and typed outputs. It exercises multitab/cross-tab Links/subflows, Function/Change/Switch/startup nodes, generic JSON, runtime failures and non-JSON results, stale updates, concurrent mutation snapshots, deletion and history. The pinned runtime suite checks native Link Call lookup/timeout, host authentication/async acceptance, exact snapshots, output rejection, crash/shutdown, observation and worker capacity/cleanup. Exec/File/custom-node cwd proof stays in `/examples/server-node-red-agents/node-red/fixtures/cwd.json`.
 
-`GET /projects` pages over the registry, `GET /projects/:id` looks up one project, `PATCH /projects/:id` changes only its display name, and `DELETE /projects/:id` unregisters it after active runs finish. No API operation erases its files. To remove retained project files in this disposable example, an operator can remove the selected Compose volume with `make cleanup-node-red-agents INSTANCE=<name>` after stopping that instance; this deletes its whole disposable registry and projects. A missing directory is still listed after restart but is unavailable to new runs (`503`). The separate `/data/agent-work` volume is the global working directory, never listed as a project.
+The provider demo creates a native agent workflow through the API and verifies overlapping runs, readable observed conversations, project cwd and direct-agent continuation with provider-confirmed `resumed: true`. The separate `make demo-node-red` example remains independent.
 
-For the real-model Docker walkthrough of project CRUD, four overlapping workflow runs, the direct agent and continuation, first create `/data/projects/existing-fixture` inside the selected project's volume with `docker compose -p <instance-project> -f examples/server-node-red-agents/compose.yaml exec -T node-red mkdir -p /data/projects/existing-fixture`. Then run `DEMO_COMPOSE_PROJECT=<instance-project> DEMO_BASE_URL=<printed-loopback-URL> API_TOKEN=<token> node --import tsx examples/server-node-red-agents/src/projects-demo.ts`. The script checks the fixture before creating any projects and prints the project-specific creation command if it is missing. Core and direct-agent prompts ask the real OpenCode model to run `pwd` and include the path; the script checks that path without asserting exact prose. Exec/File/custom-node cwd checks live in the separate native runtime fixture rather than Core. Continuation is demonstrated in the original directory: the pinned OpenCode CLI times out when resuming the same session from a different directory, so the adapter rejects such a request with `409 conversation_directory_conflict` before accepting a run. A separate fresh direct run checks selection of another explicit project. The script fails nonzero on an unmet assertion and assumes an empty project registry. Use `docker compose -p <instance-project> -f examples/server-node-red-agents/compose.yaml down --volumes` to clean up this disposable instance only.
+## Observation and worker lifecycle
 
-`POST /runs` accepts `projectId` for Core, managed workflows and the explicitly configured `agentId: "writer-agent"` direct target. An omitted ID means projectless (`run.projectId: null`) and uses `/data/agent-work`; workflow metadata and `conversationId` never select a path. The run is immediately readable after `202`. A direct agent run needs no pre-created conversation; acknowledged execution creates public conversation/message links. A supported direct continuation may pass its public `conversationId`, with the saved private OpenCode session passed to the next worker; `execution.terminal` event data includes the provider's `resumed` result. Other agent IDs return typed `501`. Runs can overlap in one directory or different directories without a project lock. There is a limit of four concurrent workers (`503 workers_busy` for excess starts). Each worker has its own private Node-RED process, port and temporary userDir and is removed after finalization or the 450-second deadline; the editor/definition runtime has its HTTP node endpoints disabled and cannot execute runs. `fileWorkingDirectory` and process cwd select the directory for core File nodes and process-relative nodes (such as Exec). The demo agent has no `cwd`/`cwdType` override or injected `msg.cwd`, so its CLI subprocess inherits the worker cwd. Nodes with absolute paths or their own base path do not inherit it. A workflow-created worktree does not change the worker cwd; pass explicit paths to later steps or start another worker from the worktree. Workflow definitions and registry persist across `stop`, while runs and public conversations remain in-memory until API restart. Private provider sessions live in the per-instance Node-RED data volume, separate from temporary worker directories.
+`settings.js` forwards `node.deployed`, `node.closed`, `execution.started` and `execution.terminal` to private `/observations`. Failed terminals log sanitized node/error categories without prompts or credentials. Acknowledged starts create public conversation/message links; successful terminals commit assistant messages and private session mappings. Poll `/runs`, run detail, linked conversations and messages to discover histories.
 
-Inventory does not grant direct invocability. Direct chat messages, cancellation, SSE, artifacts, interactions, conversation edits/deletion, and run persistence return typed `501` responses. Public conversation IDs never expose private provider session IDs.
+Worker `onReceive`, `onComplete` and `onSend` hooks create opaque per-invocation execution IDs with `key` equal to native node ID. Received means `running`; matching `done()`/`done(error)` yields completed/failed. Unmatched or ambiguous completions end `unconfirmed`, not fabricated success. Source emissions produce `node.sent`; bounded callback interruption produces `observation.incomplete`. Payloads are not included in generic observation events. The host alone finalizes runs.
+
+`MAX_WORKERS` bounds active workers (default 4, integer 1–32). Fully active capacity returns `503 workers_busy`; turnover waits up to 20 seconds for cleanup, then fails with `worker_capacity_timeout` if necessary. Workers have separate ports/userDirs/process groups and a 450-second lifetime; cleanup terminates owned agent subprocesses too. Flow/global context is per-run unless nodes use external persistence.
+
+Enable native metrics with `NODE_RED_WORKER_METRICS=true`. Logs retain Node-RED fields under `[worker runId=<id>]`; receive/send indicates activity, not completion. Inspect your project's logs and `/runs/<id>/events?after=0` when diagnosing failures. Metrics add no public API fields.
+
+## Projects and direct sessions
+
+Project provisioning supports `{}`/empty, clone from public HTTPS GitHub URLs, and registration of existing directories under `/data/projects`. Optional safe `folderName` selects an unused directory independently of display name. Legacy `repositoryUrl`/`localPath` forms remain accepted. Rename changes only display name; delete unregisters after active runs finish and never erases files. Missing directories are unavailable to new runs; symlink escapes and paths outside the project root are rejected.
+
+Only explicit `run.projectId` chooses cwd; omission uses `/data/agent-work` and `run.projectId: null`. Workflow metadata/conversation IDs do not select a directory. Same-project runs may overlap. File/Exec/process-relative nodes inherit worker cwd; absolute paths and node-specific bases do not. This is process isolation, not filesystem isolation. A workflow-created worktree does not change cwd.
+
+The configured direct target is `{kind:"agent",agentId:"writer-agent"}` with `{text:"..."}` input. A fresh run needs no conversation; acknowledged agent execution creates one. Continue with its public `conversationId` in the original directory; unsupported cross-directory resume returns `409 conversation_directory_conflict` before acceptance. Other agent IDs return typed `501`. Private provider sessions stay in the instance data volume and are never exposed as conversation IDs.
+
+For extended project CRUD/capacity/provider acceptance, create `/data/projects/existing-fixture` in your own fresh instance, then run `DEFAULT_MODEL=github-copilot/gpt-6-luna DEMO_COMPOSE_PROJECT=<project> DEMO_BASE_URL=<url> API_TOKEN=<token> node --import tsx examples/server-node-red-agents/src/projects-demo.ts`.
+
+Direct chat writes, cancellation, SSE, artifacts, interactions, conversation editing and run persistence return typed `501`. Inventory does not grant direct invocability.
+
+Primary sources: [native complete flow representation](https://nodered.org/docs/api/admin/types), [complete editor export](https://nodered.org/docs/user-guide/editor/workspace/import-export), [Link Call semantics](https://nodered.org/docs/user-guide/writing-functions#calling-link-nodes).

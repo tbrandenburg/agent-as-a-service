@@ -1,346 +1,153 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createClient, startRun } from "../../client/src/index.js";
-import { execFileSync } from "node:child_process";
 
 const base = process.env.DEMO_BASE_URL;
 const token = process.env.API_TOKEN;
 if (!base || !token) throw new Error("DEMO_BASE_URL and API_TOKEN required");
+if (process.env.DEFAULT_MODEL !== "github-copilot/gpt-6-luna")
+  throw new Error(
+    "Use DEFAULT_MODEL=github-copilot/gpt-6-luna for provider acceptance",
+  );
 const api = createClient(base, token);
-const auth = {
-  authorization: `Bearer ${token}`,
-  "content-type": "application/json",
-};
-const managed = (label: string) => ({
-  engine: "node-red",
-  specificationVersion: "managed-v1",
-  specification: {
-    label,
-    entry: "writer",
-    finalizer: "writer",
-    configs: [],
-    nodes: [{ id: "writer", type: "agent", name: "Writer", wires: [[], []] }],
+const flows: Record<string, unknown>[] = JSON.parse(
+  await readFile(new URL("../node-red/flows.json", import.meta.url), "utf8"),
+);
+const created = await api.workflows.createWorkflow({
+  body: {
+    name: "Native agent",
+    engine: "node-red",
+    specification: { entry: "workflow-in", flows },
   },
 });
-const call = (
-  path: string,
-  method: string,
-  body?: unknown,
-  headers: Record<string, string> = auth,
-) =>
-  fetch(`${base}/api/v1${path}`, {
-    method,
-    headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-function ensure(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-const observed = async (
-  detail: {
-    run: { id: string };
-    executions?: {
-      id: string;
-      runId: string;
-      key?: string | null;
-      status: string;
-    }[];
-  },
-  nodeId: string,
-  minimum: number,
-) => {
-  const deadline = Date.now() + 10_000;
-  while (
-    Date.now() < deadline &&
-    (detail.executions ?? []).filter(
-      (execution) =>
-        execution.key?.endsWith(nodeId) && execution.status === "completed",
-    ).length < minimum
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const updated = await api.runs.getRun({ params: { runId: detail.run.id } });
-    ensure(updated.status === 200, `Run ${detail.run.id} disappeared`);
-    detail = updated.body;
-  }
-  const executions = detail.executions ?? [];
-  ensure(executions.length > 0, `No node executions for ${detail.run.id}`);
-  ensure(
-    new Set(executions.map((execution) => execution.id)).size ===
-      executions.length &&
-      executions.every((execution) => execution.runId === detail.run.id),
-    `Invalid invocation IDs for ${detail.run.id}`,
-  );
-  ensure(
-    executions.filter(
-      (execution) =>
-        execution.key?.endsWith(nodeId) && execution.status === "completed",
-    ).length >= minimum,
-    `Missing completed ${nodeId} invocations for ${detail.run.id}: ${JSON.stringify(executions)}`,
-  );
-};
+assert.equal(created.status, 201);
+if (created.status !== 201) throw new Error("Workflow create failed");
 const poll = async (id: string) => {
-  const deadline = Date.now() + 900_000;
+  const deadline = Date.now() + 480_000;
   while (Date.now() < deadline) {
     const result = await api.runs.getRun({ params: { runId: id } });
-    ensure(result.status === 200, "run disappeared");
-    if (result.body.run.status === "completed") return result.body;
-    if (result.body.run.status === "failed")
-      throw new Error(`Run ${id} failed: ${result.body.run.error?.code}`);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    assert.equal(result.status, 200);
+    if (
+      result.status === 200 &&
+      ["completed", "failed"].includes(result.body.run.status)
+    ) {
+      assert.equal(
+        result.body.run.status,
+        "completed",
+        `Run ${id}: ${result.body.run.error?.code}`,
+      );
+      assert.equal(typeof result.body.run.output, "string");
+      assert.ok(result.body.run.output);
+      assert.equal(result.body.conversations?.length, 1);
+      const link = result.body.conversations![0];
+      const messages = await api.conversations.listMessages({
+        params: { conversationId: link.conversationId },
+        query: { limit: 10 },
+      });
+      assert.equal(messages.status, 200);
+      if (messages.status === 200)
+        assert.ok(
+          messages.body.items.some((message) => message.role === "assistant"),
+        );
+      console.log(
+        `Provider run=${id} status=completed version=${result.body.run.workflowVersion ?? "-"} conversation=${link.conversationId}`,
+      );
+      return result.body;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error("Run exceeded polling deadline");
+  throw new Error(`Run ${id} exceeded deadline`);
 };
-
-ensure((await fetch(`${base}/api/v1/health`)).ok, "health");
-const openapi = await fetch(`${base}/api/v1/openapi.json`);
-ensure(
-  openapi.ok && JSON.stringify(await openapi.json()).includes("/api/v1/runs"),
-  "OpenAPI",
+const prompts = [
+  "In one sentence, draft a release note about a faster search index.",
+  "In one sentence, draft a release note about clearer navigation.",
+];
+const accepted = await Promise.all(
+  prompts.map((text) =>
+    startRun(api, {
+      target: { kind: "workflow", workflowId: created.body.id },
+      input: { text },
+    }),
+  ),
 );
-const first = await startRun(api, {
-  target: { kind: "workflow", workflowId: "node-red-demo" },
+for (const response of accepted) {
+  assert.equal(response.status, 202);
+  if (response.status !== 202) throw new Error("Workflow run rejected");
+  const result = await poll(response.body.run.id);
+  assert.equal(result.conversations![0].nodeId, "core-agent");
+  assert.ok(
+    result.executions?.some((execution) => execution.key === "core-agent"),
+  );
+}
+const project = await api.projects.createProject({
+  body: { name: "Direct session acceptance" },
+});
+assert.equal(project.status, 201);
+if (project.status !== 201) throw new Error("Project create failed");
+const direct = await startRun(api, {
+  projectId: project.body.id,
+  target: { kind: "agent", agentId: "writer-agent" },
   input: {
-    text: "In one sentence, draft a release note about a faster search index.",
+    text: "Run pwd and include its exact output in your reply. Remember the word juniper.",
   },
 });
-const second = await startRun(api, {
-  target: { kind: "workflow", workflowId: "node-red-demo" },
-  input: {
-    text: "In one sentence, draft a release note about clearer navigation.",
-  },
+assert.equal(direct.status, 202);
+if (direct.status !== 202) throw new Error("Direct run rejected");
+const first = await poll(direct.body.run.id);
+assert.ok(
+  typeof first.run.output === "string" &&
+    first.run.output.includes(project.body.localPath!),
+);
+const conversationId = first.conversations![0].conversationId;
+const continued = await startRun(api, {
+  projectId: project.body.id,
+  conversationId,
+  target: { kind: "agent", agentId: "writer-agent" },
+  input: { text: "What word did I ask you to remember?" },
 });
-ensure(
-  first.status === 202 &&
-    second.status === 202 &&
-    first.body.conversations?.length === 0,
-  "prompt run acceptance",
+assert.equal(continued.status, 202);
+if (continued.status !== 202) throw new Error("Continuation rejected");
+const second = await poll(continued.body.run.id);
+assert.equal(second.conversations![0].conversationId, conversationId);
+assert.ok(
+  typeof second.run.output === "string" &&
+    second.run.output.toLowerCase().includes("juniper"),
 );
-for (const accepted of [first, second]) {
-  const id = accepted.body.run.id;
-  const complete = await poll(id);
-  ensure(
-    complete.conversations?.length === 1 && complete.run.output,
-    "one Core agent returned a result",
-  );
-  for (const link of complete.conversations) {
-    const conversation = await api.conversations.getConversation({
-      params: { conversationId: link.conversationId },
-    });
-    const messages = await api.conversations.listMessages({
-      params: { conversationId: link.conversationId },
-      query: { limit: 10 },
-    });
-    ensure(
-      conversation.status === 200 &&
-        conversation.body.agentId === link.nodeId &&
-        messages.status === 200 &&
-        messages.body.items.length === 2 &&
-        messages.body.items.every((message) => message.runId === id),
-      "readable correlated conversation",
-    );
-  }
-  ensure(
-    complete.conversations[0].nodeId === "core-agent",
-    "Core conversation link",
-  );
-  await observed(complete, "core-agent", 1);
-  console.log(
-    `Observed run ${id}: one linked conversation with complete messages`,
-  );
-}
-const listed = await api.runs.listRuns({ query: { limit: 1 } });
-ensure(
-  listed.status === 200 && listed.body.nextCursor,
-  "paginated run inventory",
-);
-console.log("Real Node-RED agent lifecycle walkthrough complete");
-const core = await api.workflows.getWorkflow({
-  params: { workflowId: "node-red-demo" },
+const events = await api.runs.listEvents({
+  params: { runId: second.run.id },
+  query: { after: 0, limit: 100 },
 });
-ensure(
-  core.status === 200 && core.body.name === "Core" && core.body.readOnly,
-  "Core visibility",
-);
-ensure(
-  (await call("/workflows/node-red-demo", "DELETE")).status === 403,
-  "Core immutable",
-);
-ensure(
-  (await call("/workflows/node-red-demo", "PUT", managed("No"))).status === 403,
-  "Core update immutable",
-);
-const valid = await call(
-  "/workflows/validate",
-  "POST",
-  managed("Managed writer"),
-);
-ensure(
-  valid.status === 200 && (await valid.json()).valid,
-  "managed validation",
-);
-for (const specification of [
-  {
-    ...managed("Bad").specification,
-    nodes: [
-      { id: "writer", type: "agent", name: "Writer", wires: [["missing"], []] },
-    ],
-  },
-  {
-    ...managed("Bad").specification,
-    nodes: [
-      managed("Bad").specification.nodes[0],
-      managed("Bad").specification.nodes[0],
-    ],
-  },
-  {
-    ...managed("Bad").specification,
-    nodes: [{ id: "writer", type: "function", name: "X", wires: [[], []] }],
-  },
-  {
-    ...managed("Bad").specification,
-    nodes: [
-      { ...managed("Bad").specification.nodes[0], credentials: { key: "bad" } },
-    ],
-  },
-  { ...managed("Bad").specification, endpoint: "/private" },
-]) {
-  const invalid = await call("/workflows/validate", "POST", {
-    ...managed("Bad"),
-    specification,
-  });
-  ensure(
-    invalid.status === 200 && !(await invalid.json()).valid,
-    "invalid specification rejected",
-  );
-}
-const created = await call("/workflows", "POST", managed("Managed writer"));
-ensure(
-  created.status === 201 && created.headers.get("etag") === '"v1"',
-  "managed creation and ETag",
-);
-const definition = (await created.json()) as { id: string };
-const id = definition.id;
-if (process.env.DEMO_COMPOSE_PROJECT) {
-  const snapshot = JSON.parse(
-    execFileSync(
-      "docker",
-      [
-        "compose",
-        "-p",
-        process.env.DEMO_COMPOSE_PROJECT,
-        "-f",
-        "examples/server-node-red-agents/compose.yaml",
-        "exec",
-        "-T",
-        "node-red",
-        "node",
-        "-e",
-        `fetch('http://127.0.0.1:1880/flow/${id}',{headers:{authorization:'Bearer '+process.env.NODE_RED_ADMIN_TOKEN}}).then(async r=>{if(!r.ok)throw new Error('Snapshot unavailable');console.log(JSON.stringify(await r.json()))}).catch(e=>{console.error(e.message);process.exitCode=1})`,
-      ],
-      { encoding: "utf8", timeout: 20_000 },
+assert.equal(events.status, 200);
+if (events.status === 200)
+  assert.ok(
+    events.body.some(
+      (event) =>
+        event.type === "execution.terminal" && event.data?.resumed === true,
     ),
-  ) as { nodes: { type: string; mode?: string }[] };
-  ensure(
-    snapshot.nodes.filter((node) => node.type === "link in").length === 1 &&
-      snapshot.nodes.some(
-        (node) => node.type === "link out" && node.mode === "return",
-      ) &&
-      !snapshot.nodes.some((node) => node.type.startsWith("http")),
-    "Managed native snapshot without HTTP infrastructure",
   );
-}
-console.log(`Created managed tab ${id}: 201 "v1"`);
-ensure(
-  (await call(`/workflows/${id}`, "GET")).headers.get("etag") === '"v1"',
-  "managed get ETag",
-);
-const managedRun = await startRun(api, {
-  target: { kind: "workflow", workflowId: id },
-  input: { text: "A small release note" },
-});
-ensure(
-  managedRun.status === 202 && managedRun.body.run.workflowVersion === 1,
-  "managed run acceptance",
-);
-const managedResult = await poll(managedRun.body.run.id);
-ensure(managedResult.conversations?.length === 1, "managed agent conversation");
-await observed(managedResult, "-writer", 1);
-const managedMessages = await api.conversations.listMessages({
-  params: { conversationId: managedResult.conversations[0].conversationId },
-  query: { limit: 10 },
-});
-ensure(
-  managedMessages.status === 200 &&
-    managedMessages.body.items.some(
-      (message) =>
-        message.role === "assistant" &&
-        typeof message.content === "string" &&
-        message.content.trim(),
-    ),
-  "real managed agent reply",
-);
-const stale = await call(`/workflows/${id}`, "PUT", managed("Stale"), {
-  ...auth,
-  "if-match": '"v9"',
-});
-ensure(stale.status === 412, "stale precondition");
-const updated = await call(
-  `/workflows/${id}`,
-  "PUT",
-  managed("Updated writer"),
-  { ...auth, "if-match": '"v1"' },
-);
-ensure(
-  updated.status === 200 && updated.headers.get("etag") === '"v2"',
-  "managed update",
-);
-console.log(`Updated managed tab ${id}: 200 "v2"`);
-const secondRun = await startRun(api, {
-  target: { kind: "workflow", workflowId: id },
-  input: { text: "A new release note" },
-});
-ensure(
-  secondRun.status === 202 && secondRun.body.run.workflowVersion === 2,
-  "updated version runs",
-);
-await observed(await poll(secondRun.body.run.id), "-writer", 1);
-ensure(
+assert.equal(
   (
-    await call(`/workflows/${id}`, "PUT", managed("Still stale"), {
-      ...auth,
-      "if-match": '"v1"',
+    await startRun(api, {
+      conversationId,
+      target: { kind: "agent", agentId: "writer-agent" },
+      input: { text: "Resume elsewhere" },
     })
-  ).status === 412,
-  "unchanged stale version",
+  ).status,
+  409,
 );
-const unconditional = await call(
-  `/workflows/${id}`,
-  "PUT",
-  managed("Final writer"),
-);
-ensure(
-  unconditional.status === 200 && unconditional.headers.get("etag") === '"v3"',
-  "unconditional update",
-);
-ensure(
-  (await call(`/workflows/${id}`, "DELETE")).status === 200,
-  "managed deletion",
-);
-ensure(
-  (await call(`/workflows/${id}`, "GET")).status === 404,
-  "managed absence",
-);
-ensure(
-  (await call(`/runs/${managedRun.body.run.id}`, "GET")).status === 200,
-  "historical run retention",
-);
-ensure(
+assert.equal(
   (
-    await call("/runs", "POST", {
-      target: { kind: "workflow", workflowId: id },
-      input: { text: "Rejected" },
+    await api.workflows.deleteWorkflow({
+      params: { workflowId: created.body.id },
     })
-  ).status === 404,
-  "deleted workflow not runnable",
+  ).status,
+  200,
+);
+assert.equal(
+  (await api.projects.deleteProject({ params: { projectId: project.body.id } }))
+    .status,
+  200,
 );
 console.log(
-  `Deleted managed tab ${id}: 200; past runs ${managedRun.body.run.id}, ${secondRun.body.run.id} retained`,
+  "Real native agent workflows, observation, project cwd and direct-session continuation passed",
 );

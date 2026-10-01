@@ -20,7 +20,7 @@ const flow = [
   { id: 'sink', z: 'native', type: 'function', func: 'return null;', outputs: 1, wires: [[]] },
 ];
 
-test('Node-RED 5.0.7 upstream Link Call: generic values, cloning, correlation, native first return, preflight, timeout and cleanup', { timeout: 30000 }, async () => {
+test('Node-RED 5.0.7 native Link Call: generic values, cloning, correlation, first return, missing target, timeout and cleanup', { timeout: 30000 }, async () => {
   assert.equal(require('node-red/package.json').version, '5.0.7');
   const dir = await mkdtemp(join(tmpdir(), 'aaas-native-'));
   const server = http.createServer();
@@ -31,7 +31,7 @@ test('Node-RED 5.0.7 upstream Link Call: generic values, cloning, correlation, n
     await RED.start();
     while (!RED.nodes.getNode('entry')) await new Promise((done) => setTimeout(done, 50));
     caller = createHostLinkCaller(RED);
-    for (const input of ['string', { repository: 'acme/example', branch: 'feature/link-call', limit: 3, enabled: true, flags: { includeTests: true }, items: ['a', 'b'] }, [{ type: 'text', text: 'part' }]]) {
+    for (const input of ['string', 42, false, null, [1, true, null, { nested: ['x', 2.5] }], { repository: 'acme/example', branch: 'feature/link-call', limit: 3, enabled: true, flags: { includeTests: true }, items: ['a', 'b'] }, [{ type: 'text', text: 'part' }]]) {
       const original = { input, agentObservation: { runId: 'control' } };
       const returned = await caller.call('entry', original);
       assert.deepEqual(returned.input, input);
@@ -44,8 +44,8 @@ test('Node-RED 5.0.7 upstream Link Call: generic values, cloning, correlation, n
     const results = await Promise.all([caller.call('entry', { input: { output: 'slow', delay: 50 } }), caller.call('entry', { input: { output: 'fast' } })]);
     assert.deepEqual(results.map((msg) => msg.payload), ['slow', 'fast']);
     assert.equal((await caller.call('entry', { input: { mode: 'multiple' } })).payload, 'first');
-    await assert.rejects(caller.call('missing', {}), /preflight/);
-    await assert.rejects(caller.call('empty', {}), /no reachable link out/);
+    await assert.rejects(caller.call('missing', {}), /not found/);
+    await assert.rejects(caller.call('empty', {}, { timeout: 30 }), /timed out/);
     await assert.rejects(caller.call('entry', { input: { mode: 'wait' } }, { timeout: 30 }), /timed out/);
     const pending = caller.call('entry', { input: { mode: 'wait' } });
     const rejected = assert.rejects(pending, /closed/);
@@ -61,7 +61,7 @@ test('Node-RED 5.0.7 upstream Link Call: generic values, cloning, correlation, n
   }
 });
 
-test('real worker host: authenticated asynchronous 202, authoritative run ID, output validation, failures and shutdown', { timeout: 60000 }, async () => {
+test('real worker host: multitab/subflow, authenticated async 202, authoritative run ID, JSON output, failures and shutdown', { timeout: 90000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'aaas-host-'));
   const finals = [];
   const callback = http.createServer(async (request, response) => {
@@ -122,11 +122,27 @@ test('real worker host: authenticated asynchronous 202, authoritative run ID, ou
     return finals.find((value) => value.runId === id);
   }
   try {
+    const multitab = require('./native-fixtures.cjs').multiply.specification;
+    const multiplication = await worker('multitab', { a: 13.75, b: -8 }, multitab.entry, false, multitab.flows);
+    assert.equal(multiplication.status, 'completed');
+    assert.equal(multiplication.output, -110);
     assert.deepEqual(await worker('string', { output: 'ok', delay: 200 }), { runId: 'string', eventId: 'string:link-call', status: 'completed', output: 'ok' });
     const parts = [{ type: 'text', text: 'reply' }, { type: 'data', data: { count: 3 } }];
     assert.deepEqual((await worker('parts', { output: parts })).output, parts);
-    for (const [id, input, target] of [['invalid', { output: {} }], ['error', { mode: 'error' }], ['timeout', { mode: 'wait' }], ['missing', {}, 'absent'], ['unreachable', {}, 'empty']])
+    for (const [id, input, target] of [['error', { mode: 'error' }], ['timeout', { mode: 'wait' }], ['missing', {}, 'absent'], ['unreachable', {}, 'empty']])
       assert.equal((await worker(id, input, target)).status, 'failed');
+    const echo = flow.map((node) => node.id === 'work' ? { ...node, func: 'msg.payload=msg.input;return msg;' } : node);
+    const object = flow.map((node) => node.id === 'work' ? { ...node, func: "msg.payload={result:-110,nested:[true,null]};return msg;" } : node);
+    assert.deepEqual((await worker('vm-object', {}, 'entry', false, object)).output, { result: -110, nested: [true, null] });
+    for (const [index, input] of ['raw string', 42, false, null, { nested: [true] }, [1, true, null, { nested: ['x', 2.5] }]].entries()) {
+      const result = await worker(`json-${index}`, input, 'entry', false, echo);
+      assert.equal(result.status, 'completed');
+      assert.deepEqual(result.output, input);
+    }
+    for (const [index, expression] of ["Buffer.from('x')", 'function(){}', 'undefined', 'NaN', '(()=>{const a={};a.self=a;return a;})()'].entries()) {
+      const invalid = flow.map((node) => node.id === 'work' ? { ...node, func: `msg.payload=${expression};return msg;` } : node);
+      assert.equal((await worker(`non-json-${index}`, {}, 'entry', false, invalid)).status, 'failed');
+    }
     await worker('crash', { mode: 'wait' }, 'entry', true);
     assert.equal(finals.some((value) => value.runId === 'crash'), false);
     const cwd = JSON.parse(await readFile(join(__dirname, 'fixtures/cwd.json'), 'utf8'));

@@ -7,7 +7,7 @@ import type { Executor } from "./backend.js";
 
 const auth = { authorization: "Bearer test-token" };
 const start = (text = "Release notes") => ({
-  target: { kind: "workflow", workflowId: "node-red-demo" },
+  target: { kind: "workflow", workflowId },
   input: { text },
 });
 const node = (
@@ -50,15 +50,32 @@ const done = (runId: string, status = "completed") => ({
   eventId: randomUUID(),
   output: "Final result",
 });
-const setup = (dispatch: Executor = async () => {}) => {
+const setup = async (dispatch: Executor = async () => {}) => {
   const backend = new AgentsBackend(dispatch);
   const app = createApp({
     token: "test-token",
     implementation: backend.implementation(),
   });
+  await request(app)
+    .post("/api/v1/workflows")
+    .set(auth)
+    .send({
+      engine: "node-red",
+      specification: {
+        entry: "workflow-in",
+        flows: [{ id: "workflow-in", type: "link in" }],
+      },
+    })
+    .then((response) => {
+      workflowId = response.body.id as string;
+    });
   return { backend, app };
 };
-const run = async (app: ReturnType<typeof setup>["app"], text?: string) => {
+let workflowId = "";
+const run = async (
+  app: Awaited<ReturnType<typeof setup>>["app"],
+  text?: string,
+) => {
   const response = await request(app)
     .post("/api/v1/runs")
     .set(auth)
@@ -71,6 +88,10 @@ describe("Node-RED lifecycle boundary", () => {
   it("transports contract workflow inputs unchanged and completes non-agent outputs", async () => {
     const inputs = [
       "literal",
+      2,
+      false,
+      null,
+      [1, true, null, { nested: ["x", 2.5] }],
       {
         repository: "acme/app",
         limit: 3,
@@ -81,7 +102,7 @@ describe("Node-RED lifecycle boundary", () => {
     ];
     for (const input of inputs) {
       const dispatched: Parameters<Executor>[0][] = [];
-      const { backend, app } = setup(async (payload) => {
+      const { backend, app } = await setup(async (payload) => {
         dispatched.push(payload);
       });
       const accepted = await request(app)
@@ -99,13 +120,15 @@ describe("Node-RED lifecycle boundary", () => {
       expect(dispatched[0].text).toBeUndefined();
       expect(backend.runs.get(id)?.run.input).toEqual(input);
       const output = [{ type: "data", data: { accepted: true } }];
-      expect(backend.finalize({ ...done(id), output: {} }).status).toBe(400);
+      expect(backend.finalize({ ...done(id), output: undefined }).status).toBe(
+        400,
+      );
       expect(backend.finalize({ ...done(id), output }).status).toBe(200);
       expect(backend.runs.get(id)?.run.output).toEqual(output);
     }
   });
   it("keeps direct agent input text-only", async () => {
-    const { app } = setup();
+    const { app } = await setup();
     for (const input of [
       "literal",
       { text: "prompt", extra: true },
@@ -121,7 +144,7 @@ describe("Node-RED lifecycle boundary", () => {
       ).toBe(400);
   });
   it("stores ordered idempotent node observations separately from provider conversations and finalizer status", async () => {
-    const { backend, app } = setup();
+    const { backend, app } = await setup();
     const id = await run(app);
     const batch = {
       runId: id,
@@ -233,7 +256,7 @@ describe("Node-RED lifecycle boundary", () => {
   });
 
   it("keeps worker crash and callback interruption visible without changing a finalized run", async () => {
-    const { backend, app } = setup();
+    const { backend, app } = await setup();
     const id = await run(app);
     expect(
       backend.observeNodes({
@@ -260,7 +283,7 @@ describe("Node-RED lifecycle boundary", () => {
   });
 
   it("preserves callback interruption reason and replayed observations across shutdown", async () => {
-    const { backend, app } = setup();
+    const { backend, app } = await setup();
     const id = await run(app);
     const batch = {
       runId: id,
@@ -318,7 +341,6 @@ describe("Node-RED lifecycle boundary", () => {
       },
       undefined,
       undefined,
-      undefined,
       async () => {
         await stopped;
         occupied = false;
@@ -329,6 +351,17 @@ describe("Node-RED lifecycle boundary", () => {
       token: "test-token",
       implementation: backend.implementation(),
     });
+    const created = await request(app)
+      .post("/api/v1/workflows")
+      .set(auth)
+      .send({
+        engine: "node-red",
+        specification: {
+          entry: "workflow-in",
+          flows: [{ id: "workflow-in", type: "link in" }],
+        },
+      });
+    workflowId = created.body.id as string;
     const first = await run(app);
     await new Promise((resolve) => setImmediate(resolve));
     expect(dispatched).toEqual([first]);
@@ -357,7 +390,7 @@ describe("Node-RED lifecycle boundary", () => {
   });
   it("accepts without waiting, discovers conversations at start, and replays complete run snapshots", async () => {
     let resolve!: () => void;
-    const { backend, app } = setup(
+    const { backend, app } = await setup(
       async () =>
         await new Promise<void>((ready) => {
           resolve = ready;
@@ -459,7 +492,7 @@ describe("Node-RED lifecycle boundary", () => {
   });
 
   it("maintains generation-safe inventory and repairs a missed deployment notice", async () => {
-    const { backend, app } = setup();
+    const { backend, app } = await setup();
     const old = node("node.deployed", "writer-agent", "old");
     const newer = node("node.deployed", "writer-agent", "new");
     expect(backend.observe(old).status).toBe(200);
@@ -490,7 +523,7 @@ describe("Node-RED lifecycle boundary", () => {
   });
 
   it("retains attempted input after failure, rejects late writes and never invents output", async () => {
-    const { backend, app } = setup();
+    const { backend, app } = await setup();
     const id = await run(app);
     const observation = started(id);
     const conversationId = backend.observe(observation).body.conversationId!;
@@ -515,7 +548,7 @@ describe("Node-RED lifecycle boundary", () => {
   });
 
   it("leaves a long-running execution active and only finalizes on explicit callback", async () => {
-    const { backend, app } = setup();
+    const { backend, app } = await setup();
     const id = await run(app);
     const observation = started(id);
     backend.observe(observation);

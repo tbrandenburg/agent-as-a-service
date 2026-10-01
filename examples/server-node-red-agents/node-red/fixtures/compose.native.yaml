@@ -1,8 +1,10 @@
 services:
   node-red:
+    environment:
+      WORKER_TIMEOUT_MS: 30000
     volumes: !override
       - node-red-data:/data
       - projects:/data/projects
       - global-work:/data/agent-work
     command:
-      - "set -e; cp /seed/settings.js /data/settings.js; cp /seed/flows.json /data/flows.json; node /seed/supervisor.js & exec /usr/src/node-red/entrypoint.sh"
+      - "set -e; mkdir -p /data/agent-work /data/projects; exec node /seed/supervisor.js"

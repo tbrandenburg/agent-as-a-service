@@ -4,7 +4,6 @@ const { createInterface } = require("node:readline");
 const { mkdtemp, writeFile, rm, symlink, realpath, stat } = require("node:fs/promises");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
-const { randomUUID } = require("node:crypto");
 
 const workers = new Map();
 const starting = new Set();
@@ -103,21 +102,12 @@ async function launch(job) {
   const global = await realpath("/data/agent-work");
   const cwd = await realpath(job.cwd);
   if ((cwd !== global && !cwd.startsWith(`${root}/`)) || !(await stat(cwd)).isDirectory()) throw new Error("Working directory outside allowed roots");
-  if (!job.tab || !Array.isArray(job.tab.nodes) || !Array.isArray(job.tab.configs) || typeof job.runId !== "string" || (job.target ? typeof job.target !== "string" : job.path !== "/agent/writer-agent")) throw new Error("Invalid worker snapshot");
+  if (!Array.isArray(job.flows) || !job.flows.length || typeof job.runId !== "string" || (job.target ? typeof job.target !== "string" : job.path !== "/agent/writer-agent")) throw new Error("Invalid worker snapshot");
   const dir = await mkdtemp(join(tmpdir(), "aaas-worker-"));
   try {
     await symlink("/data/node_modules", join(dir, "node_modules"));
-    const tab = structuredClone(job.tab);
-    const id = tab.id || randomUUID();
-    for (const node of tab.nodes) node.z = id;
-    if (tab.nodes.some((node) => ["inject", "cronplus", "trigger", "mqtt in", "tcp in", "websocket in"].includes(node.type))) throw new Error("Background trigger is not supported in worker");
-    const flow = [{ id, type: "tab", label: tab.label }, ...tab.configs, ...tab.nodes,
-      { id: "aaas-worker-ready-in", z: id, type: "http in", url: "/ready", method: "get", wires: [["aaas-worker-ready-body"]] },
-      { id: "aaas-worker-ready-body", z: id, type: "function", func: "msg.payload={ready:true};return msg;", outputs: 1, wires: [["aaas-worker-ready-response"]] },
-      { id: "aaas-worker-ready-response", z: id, type: "http response", wires: [] },
-    ];
     // Store only one version of the definition; a worker never deploys editor changes.
-    await writeFile(join(dir, "flows.json"), JSON.stringify(flow));
+    await writeSnapshot(dir, job.flows);
     await writeFile(join(dir, "settings.js"), `const base = require('/seed/settings.js'); module.exports = {...base, uiHost: '127.0.0.1', httpAdminRoot: false, fileWorkingDirectory: ${JSON.stringify(cwd)} };`);
     const port = await new Promise((resolve, reject) => {
       const socket = require("node:net").createServer();
@@ -158,6 +148,7 @@ async function launch(job) {
 const server = http.createServer(async (request, response) => {
   if (request.headers.authorization !== `Bearer ${process.env.INTERNAL_TOKEN}`) return respond(response, 401, { error: "Unauthorized" });
   try {
+    if (request.method === "GET" && request.url === "/ready") return respond(response, 200, { ready: true });
     if (request.method === "POST" && request.url === "/stop") {
       const body = await read(request);
       await stop(body.runId);
@@ -178,4 +169,5 @@ async function read(request) {
   return JSON.parse(Buffer.concat(parts).toString("utf8"));
 }
 if (require.main === module) process.on("SIGTERM", () => { for (const id of workers.keys()) void stop(id); });
-module.exports = { stop, start, workers, server, forwardWorkerOutput };
+async function writeSnapshot(dir, flows) { await writeFile(join(dir, "flows.json"), JSON.stringify(flows)); }
+module.exports = { stop, start, workers, server, forwardWorkerOutput, writeSnapshot };

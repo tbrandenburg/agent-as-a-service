@@ -318,7 +318,7 @@ describe("exchangeable contract server", () => {
             { ...token, "idempotency-key": "run-key-001" },
           )
         ).statusCode,
-      ).toBe(400);
+      ).toBe(501);
       expect(
         (
           await request(

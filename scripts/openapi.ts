@@ -89,10 +89,19 @@ const spec = createDocument({
   servers: [{ url: "http://127.0.0.1:3091" }],
   paths,
   components: {
+    schemas: { JsonValue: schemas.jsonValueSchema },
     securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
   },
   security: [{ bearerAuth: [] }],
 });
+// OpenAPI 3.0 has no null type; nullable with enum [null] represents only null.
+const json = spec.components?.schemas?.JsonValue;
+if (!json || !("anyOf" in json) || !json.anyOf)
+  throw new Error("Missing recursive JSON component");
+json.anyOf[0] = Object.assign(
+  { type: "string" as const, enum: [null] },
+  { nullable: true },
+);
 // Generate SSE JSON payload schemas with the same Zod converter as the API.
 const eventSchemas = {
   ConversationEvent: schemas.conversationEvent,
@@ -105,7 +114,10 @@ const eventSchemas = {
 const eventComponents = Object.fromEntries(
   Object.entries(eventSchemas).map(([name, schema]) => [
     name,
-    createSchema(schema, { openapi: "3.0.2" }).schema,
+    createSchema(schema, {
+      openapi: "3.0.2",
+      components: { JsonValue: schemas.jsonValueSchema },
+    }).schema,
   ]),
 );
 spec.components ??= {};

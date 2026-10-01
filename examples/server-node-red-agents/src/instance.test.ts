@@ -113,7 +113,6 @@ describe("disposable Compose lifecycle", () => {
       INSTANCE: "alpha",
       API_TOKEN: "public",
       INTERNAL_TOKEN: "internal",
-      NODE_RED_ADMIN_TOKEN: "admin",
     });
     expect(named.result.status).toBe(0);
     expect((await stat(named.seed)).isDirectory()).toBe(true);
@@ -179,7 +178,6 @@ describe("spawned persistent instances", () => {
   const tokens = {
     API_TOKEN: "public-test-token",
     INTERNAL_TOKEN: "internal-test-token",
-    NODE_RED_ADMIN_TOKEN: "admin-test-token",
   };
 
   it("generates independent names, delegates to start, and prints lifecycle commands", async () => {
@@ -239,7 +237,6 @@ describe("spawned persistent instances", () => {
     const missing = await run("spawn", {
       API_TOKEN: "public-test-token",
       INTERNAL_TOKEN: "",
-      NODE_RED_ADMIN_TOKEN: "",
     });
     expect(missing.result.status).not.toBe(0);
     expect(missing.calls).not.toContain(" up --build -d");

@@ -2,17 +2,13 @@ import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { createApp } from "../../server-express/src/index.js";
 import { AgentsBackend, WorkerCapacityError } from "./backend.js";
-import { JsonStore, NodeRedAdmin } from "./admin.js";
+import { JsonStore } from "./registry.js";
 import { Projects } from "./projects.js";
 
 const token = process.env.API_TOKEN ?? "dev-token";
 const internalToken = process.env.INTERNAL_TOKEN;
 if (!internalToken || internalToken === token)
   throw new Error("A distinct INTERNAL_TOKEN is required");
-const adminToken = process.env.NODE_RED_ADMIN_TOKEN;
-if (!adminToken || adminToken === token || adminToken === internalToken)
-  throw new Error("A distinct NODE_RED_ADMIN_TOKEN is required");
-const nodeRedUrl = process.env.NODE_RED_URL ?? "http://node-red:1880";
 const workerUrl = process.env.WORKER_URL ?? "http://node-red:1881";
 const maxWorkers = Number(process.env.MAX_WORKERS ?? "4");
 if (!Number.isSafeInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 32)
@@ -34,7 +30,6 @@ const workerCall = async (path: string, body: unknown) => {
 };
 const backend = new AgentsBackend(
   async (payload) => workerCall("/start", payload),
-  new NodeRedAdmin(nodeRedUrl, adminToken),
   new JsonStore(
     process.env.WORKFLOW_REGISTRY ?? "/workspace-data/workflows.json",
   ),
@@ -82,18 +77,6 @@ internal.post("/worker-failed", (request, response) => {
   response.json({ acknowledged: true });
 });
 const privateServer = internal.listen(3095, "0.0.0.0");
-const admin = new NodeRedAdmin(nodeRedUrl, adminToken);
-const deadline = Date.now() + 90_000;
-while (true) {
-  try {
-    if (await admin.get("agents-tab")) break;
-  } catch {
-    // Node-RED starts after the API container in Compose.
-  }
-  if (Date.now() > deadline)
-    throw new Error("Node-RED Core tab did not become ready");
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-}
 await backend.initialize();
 const publicServer = createApp({
   token,

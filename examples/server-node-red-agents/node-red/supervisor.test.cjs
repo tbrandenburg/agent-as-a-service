@@ -1,12 +1,21 @@
 const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { once } = require("node:events");
-const { mkdtemp, readdir } = require("node:fs/promises");
+const { mkdtemp, readdir, readFile, rm } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { Readable, PassThrough } = require("node:stream");
 const { test } = require("node:test");
-const { stop, start, workers, server, forwardWorkerOutput } = require("./supervisor.js");
+const { stop, start, workers, server, forwardWorkerOutput, writeSnapshot } = require("./supervisor.js");
+
+test("complete native worker snapshot is written unchanged including tabs, subflows and background nodes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "aaas-snapshot-"));
+  const flows = [{ id: "a", type: "tab" }, { id: "b", type: "tab" }, { id: "sub", type: "subflow" }, { id: "work", z: "sub", type: "function" }, { id: "startup", z: "b", type: "inject", once: true }, { id: "config", type: "arbitrary-config" }];
+  try {
+    await writeSnapshot(dir, flows);
+    assert.deepEqual(JSON.parse(await readFile(join(dir, "flows.json"), "utf8")), flows);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 
 test("native metrics require the opt-in switch and a run worker", () => {
   for (const [worker, metrics, expected] of [
@@ -18,7 +27,7 @@ test("native metrics require the opt-in switch and a run worker", () => {
     const result = spawnSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./settings.js').logging.console))"], {
       cwd: __dirname,
       encoding: "utf8",
-      env: { ...process.env, INTERNAL_TOKEN: "internal", NODE_RED_ADMIN_TOKEN: "admin", API_TOKEN: "public", WORKER_RUNTIME: worker, NODE_RED_WORKER_METRICS: metrics },
+      env: { ...process.env, INTERNAL_TOKEN: "internal", API_TOKEN: "public", WORKER_RUNTIME: worker, NODE_RED_WORKER_METRICS: metrics },
     });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { level: "info", metrics: expected, audit: false });
