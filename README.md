@@ -4,7 +4,7 @@
 
 Use it as a typed API specification when building an agent backend or client. The contract defines the HTTP surface independently of any provider, database, or server framework.
 
-The Node-RED agents example invokes native `Link In -> flow -> Link Out (return)` workflows: unchanged `run.input` becomes `msg.input`; independent working `msg.payload` returns as schema-validated `run.output` (string or `ContentPart[]`). The worker host owns authenticated invocation, correlation and finalization. Core is a single agent reading `input.text`; managed-v1 keeps its existing definition shape. See the [native runtime acceptance commands](/examples/server-node-red-agents/README.md#native-boundary-acceptance).
+The Node-RED agents example invokes native `Link In -> flow -> Link Out (return)` workflows: unchanged `run.input` becomes `msg.input`; independent working `msg.payload` returns as schema-validated `run.output` (string or `ContentPart[]`). The worker host owns authenticated invocation, correlation and finalization. Core is a single agent reading `input.text`; managed-v1 keeps its existing definition shape. See the [native runtime acceptance commands](/examples/server-node-red-agents/README.md#native-boundary-acceptance) and [warning-first quality measurements](/docs/quality.md).
 
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
