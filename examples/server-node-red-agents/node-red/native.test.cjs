@@ -6,7 +6,7 @@ const { mkdtemp, writeFile, rm, readFile, symlink } = require('node:fs/promises'
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const RED = require('node-red');
-const { createHostLinkCaller } = require('@tbrandenburg/node-red-cli');
+const { createHostLinkCaller } = require('./link-call.cjs');
 
 const listen = (server) => new Promise((done) => server.listen(0, '127.0.0.1', () => done(server.address().port)));
 const close = (server) => new Promise((done) => server.close(done));
@@ -85,7 +85,7 @@ test('real worker host: authenticated asynchronous 202, authoritative run ID, ou
     const reservation = http.createServer();
     const port = await listen(reservation);
     await close(reservation);
-    const child = spawn(process.execPath, [join(__dirname, 'worker-host.js'), dir, String(port), id], { cwd: dir, env: { ...process.env, WORKER_CWD: dir, INTERNAL_TOKEN: 'test-internal', NODE_RED_MODULES: join(__dirname, 'node_modules'), LINK_CALL_MODULE: join(__dirname, 'node_modules/@tbrandenburg/node-red-cli'), RUN_SCHEMA_MODULE: schema, WORKER_CALLBACK_URL: `http://127.0.0.1:${callbackPort}`, WORKER_TIMEOUT_MS: '1800', DEFAULT_MODEL: 'github-copilot/gpt-6-luna' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [join(__dirname, 'worker-host.js'), dir, String(port), id], { cwd: dir, env: { ...process.env, WORKER_CWD: dir, INTERNAL_TOKEN: 'test-internal', NODE_RED_MODULES: '/usr/src/node-red/node_modules', LINK_CALL_MODULE: join(__dirname, 'link-call.cjs'), RUN_SCHEMA_MODULE: schema, WORKER_CALLBACK_URL: `http://127.0.0.1:${callbackPort}`, WORKER_TIMEOUT_MS: '1800', DEFAULT_MODEL: 'github-copilot/gpt-6-luna' }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child);
     let logs = '';
     child.stdout.on('data', (data) => { logs += data; });

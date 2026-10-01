@@ -5,7 +5,7 @@ const RED = require(`${modules}/node-red`);
 const { join } = require("node:path");
 const { timingSafeEqual } = require("node:crypto");
 const { createObserver } = require("./observer.js");
-const { createHostLinkCaller } = require(process.env.LINK_CALL_MODULE || "/data/node_modules/@tbrandenburg/node-red-cli");
+const { createHostLinkCaller } = require(process.env.LINK_CALL_MODULE || "./link-call.cjs");
 const { runInput, runOutput } = require(process.env.RUN_SCHEMA_MODULE || "./run-output.cjs");
 
 const [dir, port, runId] = process.argv.slice(2);
