@@ -77,6 +77,10 @@ Run credential-free real-runtime acceptance from the repository root:
 
 Use Docker for an isolated dependency installation and the pinned native runtime.
 
+`make test-native-node-red-agents` builds, runs and removes a unique test image.
+CI runs this provider-free acceptance only for relevant example/contract/dependency
+changes. Real-provider walkthroughs remain manual adapter acceptance.
+
 ```sh
 docker build -f examples/server-node-red-agents/node-red/Dockerfile.native-test -t aaas-native-test .
 docker run --rm --network none aaas-native-test

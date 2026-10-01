@@ -42,6 +42,14 @@ The OpenCode Docker example exposes the complete contract. Conversation/message/
 
 When changing the contract, run `make generate` before `make check` and include the regenerated artifacts. Keep provider-specific logic out of `packages/contract/`.
 
+## Deliverable and validation scope
+
+- The contract is the production deliverable; servers and clients are examples.
+- Prioritize schema compatibility, engine neutrality, typed client conformance, documented semantics and generated OpenAPI fidelity.
+- Add example behavior only to demonstrate contract capabilities or resolve concrete implementation ambiguities. Avoid unsolicited production-platform features, metric frameworks and broad refactors.
+- Keep fast example regressions. Run native/runtime acceptance for relevant adapter changes and real-provider walkthroughs manually; inspect ports first and use `DEFAULT_MODEL=github-copilot/gpt-6-luna` for Node-RED model tests.
+- Run `make check-contract` for contract validation and `make check` for workspace checks. Generated artifacts must match committed sources.
+
 ## Node-RED adapter principles
 
 - Let Node-RED execute workflows; map only required contract behavior through its existing interfaces.

@@ -1,0 +1,22 @@
+name: Node-RED example acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'examples/server-node-red-agents/**'
+      - 'packages/contract/**'
+      - 'package*.json'
+      - '.dockerignore'
+      - '.github/workflows/node-red-example.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: make test-native-node-red-agents

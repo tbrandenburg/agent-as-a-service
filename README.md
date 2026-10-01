@@ -4,7 +4,7 @@
 
 Use it as a typed API specification when building an agent backend or client. The contract defines the HTTP surface independently of any provider, database, or server framework.
 
-The Node-RED agents example invokes native `Link In -> flow -> Link Out (return)` workflows: unchanged `run.input` becomes `msg.input`; independent working `msg.payload` returns as schema-validated `run.output` (string or `ContentPart[]`). The worker host owns authenticated invocation, correlation and finalization. Core is a single agent reading `input.text`; managed-v1 keeps its existing definition shape. See the [native runtime acceptance commands](/examples/server-node-red-agents/README.md#native-boundary-acceptance) and [warning-first quality measurements](/docs/quality.md).
+**The contract is the production deliverable; the servers are examples.** Validation prioritizes portable schemas, compatibility, generated OpenAPI consistency and documented API semantics. See [contract-first validation](/docs/quality.md).
 
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
@@ -67,6 +67,9 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make install` | Install locked workspace dependencies. |
 | `make generate` | Regenerate OpenAPI, catalog, and REST parity documents. |
 | `make check` | Run lint, typecheck, tests, OpenAPI/parity validation, and formatting checks. |
+| `make check-contract` | Run contract conformance tests, OpenAPI/parity validation and artifact drift checks. |
+| `make check-generated` | Regenerate published artifacts and fail if they differ from Git. |
+| `make test-native-node-red-agents` | Run isolated real Node-RED boundary and failure tests. |
 | `make security` | Audit the root and Node-RED agent npm lockfiles. |
 | `make lint` | Lint TypeScript source with Oxlint. |
 | `make format-check` | Check TypeScript formatting with Prettier. |
@@ -85,7 +88,7 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 
 The complete command list is in [`Makefile`](Makefile). After changing the contract, run `make generate` before `make check` and commit the generated files.
 
-GitHub Actions runs four independent `Checks` jobs on pushes and pull requests: Security (`make security`), Lint (`make lint`), Format (`make format-check`), and Tests (`make typecheck`, `make test`, `make validate-openapi`, `make parity`). Security audits both the root and Node-RED agent lockfiles. Install dependencies with `make install` before running individual checks locally. Docker-backed walkthroughs remain separate manual checks.
+GitHub Actions runs Security, Lint, Format, Tests and a distinct Contract check on pushes and pull requests. The Contract job validates schemas and [published JSON examples](/docs/api-examples.json), OpenAPI/parity invariants and generated-artifact drift. Security audits both root and Node-RED agent lockfiles. Real Node-RED runtime acceptance is path-filtered to relevant example/shared dependency changes; provider-backed walkthroughs remain manual. Install dependencies with `make install` before running individual checks locally.
 
 ## Build a client or server
 

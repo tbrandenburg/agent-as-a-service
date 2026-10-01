@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check quality quality-coverage quality-mutation quality-test security lint format-check typecheck test validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
+.PHONY: help install generate openapi catalog parity-doc check check-contract check-generated security lint format-check typecheck test test-contract test-native-node-red-agents validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
 
 help:
 	@printf '%s\n' \
@@ -8,9 +8,10 @@ help:
 	  'check             Run lint, typecheck, tests, OpenAPI/parity and format checks' \
 	  'security          Audit root and Node-RED agent npm dependencies' \
 	  'lint              Lint TypeScript source with Oxlint' \
-	  'quality           Warn on Node-RED source/test size, ratio and complexity growth' \
-	  'quality-coverage  Measure Node-RED branch coverage and warn on regressions' \
-	  'quality-mutation  Run bounded managed-workflow mutation testing' \
+	  'check-contract    Check contract tests, OpenAPI/parity and generated artifacts' \
+	  'check-generated   Regenerate published artifacts and fail on drift' \
+	  'test-contract     Run engine-neutral contract conformance tests' \
+	  'test-native-node-red-agents  Run isolated real Node-RED runtime tests' \
 	  'format-check      Check TypeScript formatting with Prettier' \
 	  'format            Format TypeScript source' \
 	  'dev               Start the example Express server in watch mode' \
@@ -45,7 +46,12 @@ catalog:
 parity-doc:
 	npm run parity:doc
 
-check: lint typecheck test quality-test validate-openapi parity format-check
+check: lint typecheck test validate-openapi parity format-check check-generated
+
+check-contract: test-contract validate-openapi parity check-generated
+
+check-generated: generate
+	git diff --exit-code HEAD -- openapi.json docs/catalog.md docs/rest-parity.md
 
 security:
 	npm audit
@@ -53,19 +59,6 @@ security:
 
 lint:
 	npm run lint
-	npm run quality
-
-quality:
-	npm run quality
-
-quality-coverage:
-	npm run quality:coverage
-
-quality-mutation:
-	npm run quality:mutation
-
-quality-test:
-	npm run quality:test
 
 format-check:
 	npm run format:check
@@ -75,6 +68,12 @@ typecheck:
 
 test:
 	npm test
+
+test-contract:
+	npm run test:contract
+
+test-native-node-red-agents:
+	@bash examples/server-node-red-agents/native-test.sh
 
 validate-openapi:
 	npm run validate:openapi
