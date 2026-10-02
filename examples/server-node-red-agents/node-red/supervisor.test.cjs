@@ -6,7 +6,7 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { Readable, PassThrough } = require("node:stream");
 const { test } = require("node:test");
-const { stop, start, workers, server, forwardWorkerOutput, writeSnapshot } = require("./supervisor.js");
+const { stop, start, workers, server, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit } = require("./supervisor.js");
 
 test("complete native worker snapshot is written unchanged including tabs, subflows and background nodes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "aaas-snapshot-"));
@@ -15,6 +15,22 @@ test("complete native worker snapshot is written unchanged including tabs, subfl
     await writeSnapshot(dir, flows);
     assert.deepEqual(JSON.parse(await readFile(join(dir, "flows.json"), "utf8")), flows);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("internal worker request fits two public-sized payloads plus bounded envelope headroom", async () => {
+  const publicLimit = 1024 * 1024;
+  const value = {
+    flows: "f".repeat(publicLimit),
+    input: "i".repeat(publicLimit),
+  };
+  const body = Buffer.from(JSON.stringify(value));
+  assert.ok(body.length > 1_000_000);
+  assert.ok(body.length < internalRequestLimit);
+  assert.deepEqual(await read(Readable.from([body])), value);
+  await assert.rejects(
+    read(Readable.from([Buffer.alloc(internalRequestLimit + 1)])),
+    /Too large/,
+  );
 });
 
 test("native metrics require the opt-in switch and a run worker", () => {
