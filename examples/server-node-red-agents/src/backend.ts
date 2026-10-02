@@ -688,7 +688,7 @@ export class AgentsBackend {
         return reject("Invalid or duplicate execution start");
       if (
         job.run.target?.kind === "agent" &&
-        observation.nodeId !== job.run.target.agentId
+        observation.nodeId !== job.run.target.id
       )
         return reject("Unexpected agent execution");
       // A start repairs a lost best-effort deployment notice.
@@ -710,7 +710,7 @@ export class AgentsBackend {
       const id = job.run.conversationId ?? randomUUID();
       const conversation: Conversation = {
         id,
-        agentId: observation.nodeId,
+        target: { kind: "agent", id: observation.nodeId },
         title: observation.agentName || `${observation.nodeId} conversation`,
         createdAt: new Date().toISOString(),
       };
@@ -1122,21 +1122,25 @@ export class AgentsBackend {
                 "Maximum concurrent execution workers reached",
               );
             if (
-              body.target.kind === "agent" &&
-              body.target.agentId !== "writer-agent"
+              !["agent", "workflow"].includes(body.target.kind) ||
+              (body.target.kind === "agent" &&
+                body.target.id !== "writer-agent")
             )
               return {
                 status: 501 as const,
                 body: {
                   error: {
                     code: "not_implemented",
-                    message: "Agent target is not configured",
+                    message:
+                      body.target.kind === "agent"
+                        ? "Agent target is not configured"
+                        : "Target kind is not supported",
                   },
                 },
               };
             const definition =
               body.target.kind === "workflow"
-                ? this.definition(body.target.workflowId)
+                ? this.definition(body.target.id)
                 : undefined;
             if (body.target.kind === "workflow" && !definition)
               return missing("Workflow");
@@ -1147,7 +1151,8 @@ export class AgentsBackend {
               body.conversationId &&
               (!prior ||
                 body.target.kind !== "agent" ||
-                prior.agentId !== body.target.agentId ||
+                prior.target?.kind !== "agent" ||
+                prior.target.id !== body.target.id ||
                 !this.sessions.has(body.conversationId))
             )
               return missing("Conversation");
@@ -1289,7 +1294,8 @@ export class AgentsBackend {
           const page = this.page(
             [...this.conversations.values()].filter(
               (item) =>
-                (!query.agentId || item.agentId === query.agentId) &&
+                (!query.targetKind || item.target?.kind === query.targetKind) &&
+                (!query.targetId || item.target?.id === query.targetId) &&
                 (!query.projectId || item.projectId === query.projectId),
             ),
             query.cursor,

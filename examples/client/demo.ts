@@ -71,7 +71,7 @@ try {
   if (conversation.status !== 201) throw new Error("Missing conversation");
   line(
     "Conversation",
-    `${conversation.body.id} · agent ${conversation.body.agentId}`,
+    `${conversation.body.id} · agent ${conversation.body.target?.id}`,
   );
 
   title(4, "Send a message and check immediate run visibility");
@@ -130,7 +130,7 @@ try {
   });
   requireStatus(chatEvents.status, 200, "listEvents for agent run");
   if (chatEvents.status !== 200) throw new Error("Missing agent events");
-  line("Simulated agent provider", conversation.body.agentId);
+  line("Simulated agent provider", conversation.body.target?.id);
   line(
     "Provider stream",
     `${chatEvents.body.filter((event) => event.type === "agent.assistant").length} text chunks → assistant message`,
@@ -177,7 +177,7 @@ try {
     {
       projectId: project.body.id,
       conversationId: conversation.body.id,
-      target: { kind: "workflow", workflowId: workflow.id },
+      target: { kind: "workflow", id: workflow.id },
       input: "Review the checkout change for release",
     },
     "demo-workflow-001",

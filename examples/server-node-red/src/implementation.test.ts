@@ -8,7 +8,7 @@ const app = createApp({
   implementation: new NodeRedBackend("http://127.0.0.1:0").implementation(),
 });
 const auth = { authorization: "Bearer test-token" };
-const target = { kind: "workflow", workflowId: "node-red-demo" };
+const target = { kind: "workflow", id: "node-red-demo" };
 
 describe("Node-RED contract adapter", () => {
   it("validates fixed definitions and rejects unsupported operations without contacting the engine", async () => {
@@ -58,7 +58,7 @@ describe("Node-RED contract adapter", () => {
           .post("/api/v1/runs")
           .set(auth)
           .send({
-            target: { kind: "workflow", workflowId: "missing" },
+            target: { kind: "workflow", id: "missing" },
             input: { text: "hello" },
           })
       ).status,

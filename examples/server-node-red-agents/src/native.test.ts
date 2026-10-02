@@ -96,7 +96,7 @@ describe("stored native workflows", () => {
       const run = await request(app)
         .post("/api/v1/runs")
         .set(auth)
-        .send({ target: { kind: "workflow", workflowId: id }, input: null });
+        .send({ target: { kind: "workflow", id }, input: null });
       expect(run.status).toBe(202);
       expect(run.body.run.workflowVersion).toBe(1);
       const mutations = await Promise.all(
@@ -172,7 +172,7 @@ describe("stored native workflows", () => {
           await request(app)
             .post("/api/v1/runs")
             .set(auth)
-            .send({ target: { kind: "workflow", workflowId: id }, input: true })
+            .send({ target: { kind: "workflow", id }, input: true })
         ).status,
       ).toBe(404);
       expect(await disk.load()).toEqual({});

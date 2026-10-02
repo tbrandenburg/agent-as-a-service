@@ -10,12 +10,12 @@ export const runs = t.router({
     path: "/api/v1/runs",
     query: c.pagination.extend({
       projectId: c.id.optional(),
-      targetKind: z.enum(["agent", "workflow"]).optional(),
+      targetKind: d.targetRef.shape.kind.optional(),
       status: d.runStatus.optional(),
       conversationId: c.id.optional(),
     }),
     responses: { 200: c.page(d.run), ...c.errors },
-    summary: "List agent and workflow runs",
+    summary: "List runs",
   },
   startRun: {
     method: "POST",
@@ -25,7 +25,7 @@ export const runs = t.router({
     }),
     body: d.runStart,
     responses: { 202: d.runDetail, ...c.errors, ...c.payloadTooLarge },
-    summary: "Start an agent or workflow run",
+    summary: "Start a run",
     description: `Only an explicit projectId selects a run working directory; omission means projectless/global and run.projectId is null, regardless of workflow or conversation project metadata. Every workflow may run in every accessible project. conversationId requests continuity only; it does not choose cwd. A run's separate process cwd does not isolate files, and overlapping runs may access the same directory. Nodes with absolute paths or their own path bases and workflow-created worktrees require explicit paths. Backends may reject unavailable or unauthorized projects before acceptance; project removal does not erase historical run attribution. On 202, the returned run is immediately readable through getRun. Acceptance does not promise execution completion within a fixed time. Oversized inline file content returns 413 payload_too_large. ${c.idempotencyDescription}`,
   },
   getRun: {
@@ -33,7 +33,7 @@ export const runs = t.router({
     path: "/api/v1/runs/:runId",
     pathParams: run,
     responses: { 200: d.runDetail, ...c.errors },
-    summary: "Inspect an agent or workflow run, executions and interactions",
+    summary: "Inspect a run, executions and interactions",
   },
   cancelRun: {
     method: "POST",

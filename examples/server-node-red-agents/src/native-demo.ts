@@ -57,7 +57,7 @@ const begin = async (
   version: number,
 ) => {
   const response = await startRun(api, {
-    target: { kind: "workflow", workflowId: id },
+    target: { kind: "workflow", id },
     input,
   });
   assert.equal(response.status, 202);
@@ -264,7 +264,7 @@ const deleted = await begin(id, 1, 5);
 await request(`/workflows/${id}`, "DELETE", 200);
 assert.equal((await poll(deleted)).run.output, "deleted snapshot");
 await request("/runs", "POST", 404, {
-  target: { kind: "workflow", workflowId: id },
+  target: { kind: "workflow", id },
   input: null,
 });
 assert.equal(

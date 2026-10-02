@@ -50,12 +50,16 @@ export function createDemoImplementation(
       createConversation: async ({ body }) => {
         if (body.projectId && !store.projects.has(body.projectId))
           return missing("Project");
-        if (body.agentId && body.agentId !== store.agent.getType())
+        if (
+          body.target &&
+          (body.target.kind !== "agent" ||
+            body.target.id !== store.agent.getType())
+        )
           return missing("Agent");
         const conversation = {
           id: randomUUID(),
           projectId: body.projectId,
-          agentId: body.agentId ?? store.agent.getType(),
+          target: body.target ?? { kind: "agent", id: store.agent.getType() },
           title: body.title ?? "Demo conversation",
           createdAt: store.timestamp(),
         };
@@ -160,14 +164,24 @@ export function createDemoImplementation(
           );
         if (
           body.target?.kind === "workflow" &&
-          body.target.workflowId !== store.workflow.id
+          body.target.id !== store.workflow.id
         )
           return missing("Workflow");
         if (
           body.target?.kind === "agent" &&
-          body.target.agentId !== store.agent.getType()
+          body.target.id !== store.agent.getType()
         )
           return missing("Agent");
+        if (body.target && !["agent", "workflow"].includes(body.target.kind))
+          return {
+            status: 501,
+            body: {
+              error: {
+                code: "not_implemented",
+                message: "Target kind is not supported",
+              },
+            },
+          };
         const created = store.once(
           "POST /runs",
           headers["idempotency-key"],

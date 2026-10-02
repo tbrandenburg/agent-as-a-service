@@ -3,7 +3,7 @@
     "operation": "startRun",
     "kind": "request",
     "value": {
-      "target": { "kind": "workflow", "workflowId": "review" },
+      "target": { "kind": "workflow", "id": "review" },
       "input": { "repository": "acme/app", "limit": 3, "enabled": true }
     }
   },
@@ -20,7 +20,7 @@
       "run": {
         "id": "run-1",
         "projectId": null,
-        "target": { "kind": "workflow", "workflowId": "review" },
+        "target": { "kind": "workflow", "id": "review" },
         "status": "queued",
         "createdAt": "2026-01-01T00:00:00Z",
         "updatedAt": "2026-01-01T00:00:00Z"
@@ -57,6 +57,17 @@
     "operation": "sendMessage",
     "kind": "request",
     "value": { "content": [{ "type": "file", "name": "review.txt", "contentBase64": "aGVsbG8=" }] }
+  },
+  {
+    "operation": "createConversation",
+    "kind": "request",
+    "value": { "target": { "kind": "team", "id": "reviewers" } }
+  },
+  {
+    "operation": "createConversation",
+    "kind": "response",
+    "status": 201,
+    "value": { "id": "chat-1", "target": { "kind": "team", "id": "reviewers" }, "title": "Review", "createdAt": "2026-01-01T00:00:00Z" }
   },
   {
     "operation": "createWorkflow",

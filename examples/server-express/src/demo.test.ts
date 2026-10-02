@@ -38,6 +38,44 @@ describe("in-memory demo lifecycle", () => {
         payload: {},
       });
       const conversationId = conversation.json().id as string;
+      expect(conversation.statusCode).toBe(201);
+      expect(conversation.json().target).toEqual({
+        kind: "agent",
+        id: "assistant-demo",
+      });
+      expect(conversation.json()).not.toHaveProperty("agentId");
+      const selected = await app.inject({
+        method: "POST",
+        url: "/api/v1/conversations",
+        headers: auth,
+        payload: { target: conversation.json().target },
+      });
+      expect(selected.statusCode).toBe(201);
+      expect(selected.json().target).toEqual(conversation.json().target);
+      for (const target of [
+        { kind: "", id: "demo" },
+        { kind: "agent", id: "" },
+      ])
+        expect(
+          (
+            await app.inject({
+              method: "POST",
+              url: "/api/v1/conversations",
+              headers: auth,
+              payload: { target },
+            })
+          ).statusCode,
+        ).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/v1/conversations",
+            headers: auth,
+            payload: { target: { kind: "team", id: "demo" } },
+          })
+        ).statusCode,
+      ).toBe(404);
       const first = await send(conversationId, "Review this change");
       expect(first.statusCode).toBe(202);
       await finished(first.json().run.id);
@@ -141,7 +179,7 @@ describe("in-memory demo lifecycle", () => {
         "POST",
         "/api/v1/runs",
         {
-          target: { kind: "workflow", workflowId: "review-demo" },
+          target: { kind: "workflow", id: "review-demo" },
           projectId,
           conversationId,
           input: "Check the change",

@@ -29,7 +29,7 @@ const setup = async (
       },
     });
   const body: z.infer<typeof schemas.runStart> = {
-    target: { kind: "workflow", workflowId: workflow.body.id as string },
+    target: { kind: "workflow", id: workflow.body.id as string },
     input: null,
   };
   const begin = async (
@@ -166,7 +166,7 @@ describe("Node-RED run controls", () => {
       stops.push(id);
     });
     const accepted = await begin({
-      target: { kind: "agent", agentId: "writer-agent" },
+      target: { kind: "agent", id: "writer-agent" },
       input: { text: "wait" },
     });
     const id = accepted.body.run.id as string;
@@ -337,7 +337,7 @@ describe("Node-RED run controls", () => {
       },
     );
     const body = {
-      target: { kind: "agent", agentId: "writer-agent" },
+      target: { kind: "agent", id: "writer-agent" },
       input: { text: "remember" },
     };
     const accepted = await request(app)

@@ -230,7 +230,7 @@ const createdWorkflow = await api.workflows.createWorkflow({
 ensure(createdWorkflow.status === 201, "native project workflow created");
 const target = {
   kind: "workflow" as const,
-  workflowId: createdWorkflow.body.id,
+  id: createdWorkflow.body.id,
 };
 const begin = async (projectId?: string) => {
   const accepted = await startRun(api, {
@@ -315,7 +315,7 @@ ensure(
   "projectless process cwd",
 );
 const globalAgent = await startRun(api, {
-  target: { kind: "agent", agentId: "writer-agent" },
+  target: { kind: "agent", id: "writer-agent" },
   input: { text: "Run pwd and include its exact output in your reply." },
 });
 ensure(
@@ -331,7 +331,7 @@ ensure(
   "projectless direct cwd and public conversation",
 );
 const direct = await startRun(api, {
-  target: { kind: "agent", agentId: "writer-agent" },
+  target: { kind: "agent", id: "writer-agent" },
   input: { text: "Run pwd and include its exact output in your reply." },
   projectId: empty.id,
 });
@@ -350,7 +350,7 @@ ensure(
 ensure(
   (
     await call("/runs", "POST", {
-      target: { kind: "agent", agentId: "writer-agent" },
+      target: { kind: "agent", id: "writer-agent" },
       input: { text: "Continue elsewhere" },
       conversationId: directDetail.conversations[0].conversationId,
       projectId: clone.id,
@@ -359,7 +359,7 @@ ensure(
   "cross-directory continuation rejected before acceptance",
 );
 const continuation = await startRun(api, {
-  target: { kind: "agent", agentId: "writer-agent" },
+  target: { kind: "agent", id: "writer-agent" },
   input: { text: "Run pwd again and include its exact output in your reply." },
   conversationId: directDetail.conversations[0].conversationId,
   projectId: empty.id,
@@ -375,7 +375,7 @@ ensure(
   `continuation preserves conversation and selected cwd: ${JSON.stringify({ status: continued.run.status, error: continued.run.error, output: continued.run.output, links: continued.conversations })}`,
 );
 const otherProject = await startRun(api, {
-  target: { kind: "agent", agentId: "writer-agent" },
+  target: { kind: "agent", id: "writer-agent" },
   input: { text: "Run pwd and include its exact output in your reply." },
   projectId: clone.id,
 });
@@ -402,7 +402,7 @@ ensure(
 ensure(
   (
     await call("/runs", "POST", {
-      target: { kind: "agent", agentId: "not-configured" },
+      target: { kind: "agent", id: "not-configured" },
       input: { text: "hello" },
     })
   ).status === 501,

@@ -65,7 +65,7 @@ const prompts = [
 const accepted = await Promise.all(
   prompts.map((text) =>
     startRun(api, {
-      target: { kind: "workflow", workflowId: created.body.id },
+      target: { kind: "workflow", id: created.body.id },
       input: { text },
     }),
   ),
@@ -86,7 +86,7 @@ assert.equal(project.status, 201);
 if (project.status !== 201) throw new Error("Project create failed");
 const direct = await startRun(api, {
   projectId: project.body.id,
-  target: { kind: "agent", agentId: "writer-agent" },
+  target: { kind: "agent", id: "writer-agent" },
   input: {
     text: "Run pwd and include its exact output in your reply. Remember the word juniper.",
   },
@@ -127,7 +127,7 @@ console.log(
 const continued = await startRun(api, {
   projectId: project.body.id,
   conversationId,
-  target: { kind: "agent", agentId: "writer-agent" },
+  target: { kind: "agent", id: "writer-agent" },
   input: { text: "What word did I ask you to remember?" },
 });
 assert.equal(continued.status, 202);
@@ -154,7 +154,7 @@ assert.equal(
   (
     await startRun(api, {
       conversationId,
-      target: { kind: "agent", agentId: "writer-agent" },
+      target: { kind: "agent", id: "writer-agent" },
       input: { text: "Resume elsewhere" },
     })
   ).status,

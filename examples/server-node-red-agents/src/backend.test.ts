@@ -7,7 +7,7 @@ import type { Executor } from "./backend.js";
 
 const auth = { authorization: "Bearer test-token" };
 const start = (text = "Release notes") => ({
-  target: { kind: "workflow", workflowId },
+  target: { kind: "workflow", id: workflowId },
   input: { text },
 });
 const node = (
@@ -85,6 +85,85 @@ const run = async (
 };
 
 describe("Node-RED lifecycle boundary", () => {
+  it("validates generic targets before resolving backend-supported kinds", async () => {
+    const { app } = await setup();
+    for (const target of [
+      { kind: "", id: workflowId },
+      { kind: "workflow", id: "" },
+      { kind: "workflow" },
+    ])
+      expect(
+        (
+          await request(app)
+            .post("/api/v1/runs")
+            .set(auth)
+            .send({ target, input: null })
+        ).status,
+      ).toBe(400);
+    const unsupported = await request(app)
+      .post("/api/v1/runs")
+      .set(auth)
+      .send({ target: { kind: "pipeline", id: "opaque" }, input: null });
+    expect(unsupported.status).toBe(501);
+    expect(unsupported.body.error.code).toBe("not_implemented");
+    const id = await run(app);
+    expect(
+      (await request(app).get(`/api/v1/runs/${id}`).set(auth)).body.run.target,
+    ).toEqual({ kind: "workflow", id: workflowId });
+    expect(
+      (
+        await request(app)
+          .get("/api/v1/runs")
+          .query({ targetKind: "workflow" })
+          .set(auth)
+      ).body.items.map((item: { id: string }) => item.id),
+    ).toEqual([id]);
+    expect(
+      (
+        await request(app)
+          .get("/api/v1/runs")
+          .query({ targetKind: "pipeline" })
+          .set(auth)
+      ).body.items,
+    ).toEqual([]);
+  });
+  it("exposes observed conversation targets and conjunctive generic filters", async () => {
+    const { backend, app } = await setup();
+    const id = await run(app);
+    expect(backend.observe(started(id)).status).toBe(200);
+    const second = await run(app);
+    expect(
+      backend.observe(started(second, randomUUID(), "review-agent")).status,
+    ).toBe(200);
+    const queries = [
+      [{ targetKind: "agent" }, 2],
+      [{ targetId: "writer-agent" }, 1],
+      [{ targetKind: "agent", targetId: "writer-agent" }, 1],
+      [{ targetKind: "workflow", targetId: "writer-agent" }, 0],
+      [{ targetId: "missing" }, 0],
+    ] as const;
+    for (const [query, count] of queries) {
+      const response = await request(app)
+        .get("/api/v1/conversations")
+        .query(query)
+        .set(auth);
+      expect(response.status).toBe(200);
+      expect(response.body.items).toHaveLength(count);
+      for (const item of response.body.items) {
+        expect(item.target.kind).toBe("agent");
+        expect(item).not.toHaveProperty("agentId");
+        expect(
+          (await request(app).get(`/api/v1/conversations/${item.id}`).set(auth))
+            .body.target,
+        ).toEqual(item.target);
+      }
+    }
+    for (const query of [{ targetKind: "" }, { targetId: "" }])
+      expect(
+        (await request(app).get("/api/v1/conversations").query(query).set(auth))
+          .status,
+      ).toBe(400);
+  });
   it("transports contract workflow inputs unchanged and completes non-agent outputs", async () => {
     const inputs = [
       "literal",
@@ -139,7 +218,7 @@ describe("Node-RED lifecycle boundary", () => {
           await request(app)
             .post("/api/v1/runs")
             .set(auth)
-            .send({ target: { kind: "agent", agentId: "writer-agent" }, input })
+            .send({ target: { kind: "agent", id: "writer-agent" }, input })
         ).status,
       ).toBe(400);
   });

@@ -58,7 +58,7 @@ Start with:
 
 ```json
 {
-  "target": { "kind": "workflow", "workflowId": "<created-id>" },
+  "target": { "kind": "workflow", "id": "<created-id>" },
   "input": { "a": 13.75, "b": -8 }
 }
 ```
@@ -120,7 +120,7 @@ Project provisioning supports `{}`/empty, clone from public HTTPS GitHub URLs, a
 
 Only explicit `run.projectId` chooses cwd; omission uses `/data/agent-work` and `run.projectId: null`. Workflow metadata/conversation IDs do not select a directory. Same-project runs may overlap. File/Exec/process-relative nodes inherit worker cwd; absolute paths and node-specific bases do not. This is process isolation, not filesystem isolation. A workflow-created worktree does not change cwd.
 
-The configured direct target is `{kind:"agent",agentId:"writer-agent"}` with `{text:"..."}` input. A fresh run needs no conversation; acknowledged agent execution creates one. Continue with its public `conversationId` in the original directory; unsupported cross-directory resume returns `409 conversation_directory_conflict` before acceptance. Other agent IDs return typed `501`. Private provider sessions stay in the instance data volume and are never exposed as conversation IDs.
+The configured direct target is `{kind:"agent",id:"writer-agent"}` with `{text:"..."}` input. A fresh run needs no conversation; acknowledged agent execution creates one with `target: {kind:"agent",id:"<node-id>"}` metadata. Continue with its public `conversationId` in the original directory; unsupported cross-directory resume returns `409 conversation_directory_conflict` before acceptance. Other agent IDs and unsupported target kinds return typed `501`. Private provider sessions stay in the instance data volume and are never exposed as conversation IDs.
 
 For extended project CRUD/capacity/provider acceptance, create `/data/projects/existing-fixture` in your own fresh instance, then run `DEFAULT_MODEL=github-copilot/gpt-6-luna DEMO_COMPOSE_PROJECT=<project> DEMO_BASE_URL=<url> API_TOKEN=<token> node --import tsx examples/server-node-red-agents/src/projects-demo.ts`.
 

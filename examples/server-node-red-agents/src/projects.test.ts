@@ -147,7 +147,7 @@ describe("project directory registry and run acceptance", () => {
         .set(auth)
         .send({
           ...(projectId ? { projectId } : {}),
-          target: { kind: "agent", agentId: "writer-agent" },
+          target: { kind: "agent", id: "writer-agent" },
           input: { text: "test" },
         });
     const [a, b, global] = await Promise.all([start(id), start(id), start()]);
@@ -195,7 +195,7 @@ describe("project directory registry and run acceptance", () => {
         .post("/api/v1/runs")
         .set(auth)
         .send({
-          target: { kind: "agent", agentId: "writer-agent" },
+          target: { kind: "agent", id: "writer-agent" },
           input: { text: "Continue" },
           ...(conversationId ? { conversationId } : {}),
         });
@@ -310,7 +310,7 @@ describe("project directory registry and run acceptance", () => {
       .post("/api/v1/runs")
       .set(auth)
       .send({
-        target: { kind: "agent", agentId: "writer-agent" },
+        target: { kind: "agent", id: "writer-agent" },
         input: { text: "First" },
       });
     expect(initial.status).toBe(202);
@@ -354,7 +354,7 @@ describe("project directory registry and run acceptance", () => {
       .post("/api/v1/runs")
       .set(auth)
       .send({
-        target: { kind: "agent", agentId: "writer-agent" },
+        target: { kind: "agent", id: "writer-agent" },
         input: { text: "Continue" },
         conversationId,
         projectId: project.body.id,

@@ -84,7 +84,7 @@ export async function runControlAcceptance(
     ),
   );
   const body = {
-    target: { kind: "workflow", workflowId: slow.id },
+    target: { kind: "workflow", id: slow.id },
     input: null,
   };
   const key = randomUUID();
@@ -171,7 +171,7 @@ export async function runControlAcceptance(
     [bad, "failed"],
   ] as const) {
     const response = await call("/runs", "POST", 202, {
-      target: { kind: "workflow", workflowId: workflow.id },
+      target: { kind: "workflow", id: workflow.id },
       input: "capacity released",
     });
     const runId = response.run.id as string;
