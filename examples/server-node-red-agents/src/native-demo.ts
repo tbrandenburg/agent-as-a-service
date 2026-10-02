@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createClient, startRun } from "../../client/src/index.js";
 import { echo, multiply } from "./native-fixtures.js";
+import { runControlAcceptance } from "./run-control-demo.js";
 import type { Input } from "./native.js";
 import type { schemas } from "@agent-as-a-service/contract";
 import type { z } from "zod";
@@ -107,17 +108,25 @@ const multiplication = await poll(await begin(id, { a: 13.75, b: -8 }, 1));
 assert.equal(multiplication.run.status, "completed");
 assert.equal(multiplication.run.output, -110);
 assert.deepEqual(multiplication.conversations, []);
-const events = await api.runs.listEvents({
-  params: { runId: multiplication.run.id },
-  query: { after: 0, limit: 100 },
-});
-assert.equal(events.status, 200);
-if (events.status === 200)
-  for (const nodeId of ["entry", "internal", "change", "switch"])
-    assert.ok(
-      events.body.some((event) => event.data?.nodeId === nodeId),
-      `Observed ${nodeId}`,
-    );
+// Public finalization can precede the independent observation queue's drain.
+const observationDeadline = Date.now() + 10_000;
+const observed = new Set<string>();
+while (Date.now() < observationDeadline) {
+  const events = await api.runs.listEvents({
+    params: { runId: multiplication.run.id },
+    query: { after: 0, limit: 100 },
+  });
+  assert.equal(events.status, 200);
+  if (events.status === 200)
+    for (const event of events.body)
+      if (typeof event.data?.nodeId === "string")
+        observed.add(event.data.nodeId);
+  if (["entry", "internal", "change", "switch"].every((id) => observed.has(id)))
+    break;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+for (const nodeId of ["entry", "internal", "change", "switch"])
+  assert.ok(observed.has(nodeId), `Observed ${nodeId}`);
 const updated = await request(`/workflows/${id}`, "PUT", 200, echo(), '"v1"');
 assert.equal(updated.etag, '"v2"');
 for (const input of [
@@ -265,3 +274,4 @@ assert.equal(
 console.log(
   "Native HTTP acceptance passed: multitab/subflow, JSON values, runtime failures, ETags and mutation snapshots",
 );
+await runControlAcceptance(base, token, multiplication.run.id);

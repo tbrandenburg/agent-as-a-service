@@ -52,7 +52,7 @@ Submit complete editor flow JSON with the explicit public Link In entry:
 
 `POST /api/v1/workflows/validate` validates only `engine`, an object specification, nonempty `entry`, a nonempty object array `flows`, and exactly one matching entry whose type is `link in`. Node-RED owns graph and node semantics. Multiple tabs/Link In nodes, subflows, config nodes, arbitrary installed/community nodes and startup/background nodes are supported without a node-type policy. Workflow authors are trusted. Complete editor exports do not carry separate Node-RED credential state; environment-backed/native external configuration remains available.
 
-Create returns `201`, an opaque AaaS workflow ID independent of tab IDs, and strong `ETag: "v1"`. GET and PUT return the current `"vN"`; optional `If-Match` on PUT rejects stale versions with `412`. Update/delete succeed while older runs are active. Acceptance clones the exact native definition, records `run.workflowVersion`, and writes the complete `flows` array unchanged to the worker: no generated nodes or ID/`z`/wire rewriting. Deletion leaves historical runs readable until API restart.
+Create returns `201`, an opaque AaaS workflow ID independent of tab IDs, and strong `ETag: "v1"`. GET and PUT return the current `"vN"`; optional `If-Match` on PUT rejects stale versions with `412`. Update/delete succeed while older runs are active. Acceptance clones the exact native definition, records `run.workflowVersion`, and writes the complete `flows` array unchanged to the worker: no generated nodes or ID/`z`/wire rewriting. Workflow deletion leaves historical runs readable until explicit run deletion or API restart.
 
 Start with:
 
@@ -100,9 +100,9 @@ bash examples/server-node-red-agents/native-acceptance.sh
 DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=dev-token make demo-node-red-agents
 ```
 
-The provider-free HTTP script builds production images without a home seed and records statuses, ETags, opaque workflow/run IDs, versions and typed outputs. It exercises multitab/cross-tab Links/subflows, Function/Change/Switch/startup nodes, generic JSON, runtime failures and non-JSON results, stale updates, concurrent mutation snapshots, deletion and history. The pinned runtime suite checks native Link Call lookup/timeout, host authentication/async acceptance, exact snapshots, output rejection, crash/shutdown, observation and worker capacity/cleanup. Exec/File/custom-node cwd proof stays in `/examples/server-node-red-agents/node-red/fixtures/cwd.json`.
+The provider-free HTTP script builds production images without a home seed and records statuses, ETags, opaque workflow/run IDs, versions and typed outputs. It exercises multitab/cross-tab Links/subflows, Function/Change/Switch/startup nodes, generic JSON, runtime failures and non-JSON results, stale updates, concurrent mutation snapshots, deletion and history. Run-control acceptance cancels an observed slow Function and an immediately accepted run, verifies unconfirmed observations and worker absence after the original delay, checks released capacity, resume conflicts, active/terminal deletion and identical accepted-start replay after deletion. The pinned runtime suite checks native Link Call lookup/timeout, host authentication/async acceptance, exact snapshots, output rejection, crash/shutdown, observation and deterministic stop/start capacity races. Exec/File/custom-node cwd proof stays in `/examples/server-node-red-agents/node-red/fixtures/cwd.json`.
 
-The provider demo creates a native agent workflow through the API and verifies overlapping runs, readable observed conversations, project cwd and direct-agent continuation with provider-confirmed `resumed: true`. The separate `make demo-node-red` example remains independent.
+The provider demo creates a native agent workflow through the API and verifies overlapping runs, readable observed conversations, project cwd and direct-agent continuation after deleting the preceding terminal run, with retained history and provider-confirmed `resumed: true`. The separate `make demo-node-red` example remains independent.
 
 ## Observation and worker lifecycle
 
@@ -124,6 +124,14 @@ The configured direct target is `{kind:"agent",agentId:"writer-agent"}` with `{t
 
 For extended project CRUD/capacity/provider acceptance, create `/data/projects/existing-fixture` in your own fresh instance, then run `DEFAULT_MODEL=github-copilot/gpt-6-luna DEMO_COMPOSE_PROJECT=<project> DEMO_BASE_URL=<url> API_TOKEN=<token> node --import tsx examples/server-node-red-agents/src/projects-demo.ts`.
 
-Direct chat writes, cancellation, SSE, artifacts, interactions, conversation editing and run persistence return typed `501`. Inventory does not grant direct invocability.
+## Run controls
+
+`POST /api/v1/runs/:runId/cancel` claims a queued/running/paused run, closes unfinished node observations as `unconfirmed`, and waits for its isolated worker/process group to stop before returning `200 {run}` with status `cancelled`. Pending launches are stopped too; late finalizers, observations and expected exits cannot overwrite the claim. An optional `{reason}` is recorded in `run.cancelled` event data, not `run.error`. Unknown runs return `404`; terminal runs return `409 run_not_active`. An uncertain shutdown returns `503 worker_stop_failed`, retains the cancellation claim and active capacity, and permits retry; it never reports successful cancellation while execution may remain live.
+
+`POST /api/v1/runs/:runId/resume` is implemented but current runs return `409 run_not_resumable` (`404` if unknown). No workflow is replayed. A future suspension producer may supply an executor-owned opaque continuation for a paused run; the runtime would continue the same public run without AaaS interpreting the graph. Direct-agent conversation continuation starts a separate run and is independent of run resume.
+
+`DELETE /api/v1/runs/:runId` accepts completed/failed/rejected/cancelled runs and removes their public detail, events and run-scoped bookkeeping. Active runs return `409 run_active`; unknown/deleted runs return `404`. Conversation/messages, provider sessions, project files and workflow definitions survive. Accepted `Idempotency-Key` responses remain identical for at least 24 hours, even after deletion; their historical run ID then returns `404` rather than dispatching duplicate work. Histories/cache are in-memory and restart limitations still apply.
+
+Direct chat writes, SSE, artifacts, interactions, conversation editing and run persistence return typed `501`. Inventory does not grant direct invocability.
 
 Primary sources: [native complete flow representation](https://nodered.org/docs/api/admin/types), [complete editor export](https://nodered.org/docs/user-guide/editor/workspace/import-export), [Link Call semantics](https://nodered.org/docs/user-guide/writing-functions#calling-link-nodes).
