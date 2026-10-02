@@ -147,7 +147,7 @@ describe("project directory registry and run acceptance", () => {
         .set(auth)
         .send({
           ...(projectId ? { projectId } : {}),
-          target: { kind: "agent", agentId: "writer-agent" },
+          target: { kind: "workflow", id: "core" },
           input: { text: "test" },
         });
     const [a, b, global] = await Promise.all([start(id), start(id), start()]);
@@ -166,7 +166,7 @@ describe("project directory registry and run acceptance", () => {
     ]);
     for (const call of calls) {
       expect(
-        call.flows.find((node) => node.id === "writer-agent"),
+        call.flows.find((node) => node.id === "orchestrator"),
       ).toMatchObject({
         model: "DEFAULT_MODEL",
         modelType: "env",
@@ -188,14 +188,14 @@ describe("project directory registry and run acceptance", () => {
     expect(await readdir(created.body.localPath)).toEqual([]);
   });
 
-  it("preserves one public conversation across direct continuation and reports provider confirmation", async () => {
+  it("captures Core conversation and session observations and rejects continuation without dispatch", async () => {
     const { app, auth, backend, calls } = await setup();
     const start = async (conversationId?: string) =>
       request(app)
         .post("/api/v1/runs")
         .set(auth)
         .send({
-          target: { kind: "agent", agentId: "writer-agent" },
+          target: { kind: "workflow", id: "core" },
           input: { text: "Continue" },
           ...(conversationId ? { conversationId } : {}),
         });
@@ -212,10 +212,10 @@ describe("project directory registry and run acceptance", () => {
       type,
       eventId: `${type}-${executionId}`,
       timestamp: new Date().toISOString(),
-      nodeId: "writer-agent",
+      nodeId: "orchestrator",
       deploymentId,
       agent: "opencode",
-      agentName: "Writer",
+      agentName: "orchestrator",
       executionId,
       agentObservation: { runId: id },
       input: { invocation: "prompt", prompt: "Continue" },
@@ -252,65 +252,31 @@ describe("project directory registry and run acceptance", () => {
       }).status,
     ).toBe(200);
     const resumed = await start(id);
-    expect(resumed.status).toBe(202);
-    expect(resumed.body.conversations).toEqual([
-      { conversationId: id, nodeId: "writer-agent" },
-    ]);
+    expect(resumed.status).toBe(501);
+    expect(resumed.body.error.code).toBe(
+      "conversation_continuation_unsupported",
+    );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(calls[1]).toMatchObject({ sessionID: "provider-session" });
-    expect(
-      backend.observe(
-        observation(
-          resumed.body.run.id,
-          "execution.started",
-          "exec-resumed",
-          "deploy-resumed",
-        ),
-      ).body.conversationId,
-    ).toBe(id);
-    expect(
-      backend.observe(
-        observation(
-          resumed.body.run.id,
-          "execution.terminal",
-          "exec-resumed",
-          "deploy-resumed",
-          {
-            status: "completed",
-            output: { payload: "Second" },
-            sessionID: "provider-session",
-            resumed: true,
-          },
-        ),
-      ).status,
-    ).toBe(200);
-    expect(
-      backend.finalize({
-        runId: resumed.body.run.id,
-        eventId: "resumed-final",
-        status: "completed",
-        output: "Second",
-      }).status,
-    ).toBe(200);
+    expect(calls).toHaveLength(1);
     const messages = await request(app)
       .get(`/api/v1/conversations/${id}/messages`)
       .set(auth);
     expect(
       messages.body.items.map((message: { role: string }) => message.role),
-    ).toEqual(["user", "assistant", "user", "assistant"]);
+    ).toEqual(["user", "assistant"]);
     expect(
-      (await request(app).get(`/api/v1/runs/${resumed.body.run.id}`).set(auth))
+      (await request(app).get(`/api/v1/runs/${initial.body.run.id}`).set(auth))
         .body.conversations,
-    ).toEqual([{ conversationId: id, nodeId: "writer-agent" }]);
+    ).toEqual([{ conversationId: id, nodeId: "orchestrator" }]);
   });
 
-  it("rejects cross-directory OpenCode continuation before accepting a run", async () => {
+  it("rejects conversationId even with a different explicit project before accepting a run", async () => {
     const { app, auth, backend } = await setup();
     const initial = await request(app)
       .post("/api/v1/runs")
       .set(auth)
       .send({
-        target: { kind: "agent", agentId: "writer-agent" },
+        target: { kind: "workflow", id: "core" },
         input: { text: "First" },
       });
     expect(initial.status).toBe(202);
@@ -320,10 +286,10 @@ describe("project directory registry and run acceptance", () => {
       type: "execution.started",
       eventId: "first-start",
       timestamp: new Date().toISOString(),
-      nodeId: "writer-agent",
+      nodeId: "orchestrator",
       deploymentId: "first-deployment",
       agent: "opencode",
-      agentName: "Writer",
+      agentName: "orchestrator",
       executionId: "first-execution",
       agentObservation: { runId },
       input: { invocation: "prompt", prompt: "First" },
@@ -354,13 +320,15 @@ describe("project directory registry and run acceptance", () => {
       .post("/api/v1/runs")
       .set(auth)
       .send({
-        target: { kind: "agent", agentId: "writer-agent" },
+        target: { kind: "workflow", id: "core" },
         input: { text: "Continue" },
         conversationId,
         projectId: project.body.id,
       });
-    expect(resumed.status).toBe(409);
-    expect(resumed.body.error.code).toBe("conversation_directory_conflict");
+    expect(resumed.status).toBe(501);
+    expect(resumed.body.error.code).toBe(
+      "conversation_continuation_unsupported",
+    );
     expect(backend.runs.size).toBe(1);
   });
 });

@@ -61,7 +61,10 @@ export class OpenCodeBackend {
       conversations: {
         ...notImplementedRoutes.conversations,
         createConversation: async ({ body }) => {
-          if (body.agentId && body.agentId !== "opencode")
+          if (
+            body.target &&
+            (body.target.kind !== "agent" || body.target.id !== "opencode")
+          )
             return problem(
               400,
               "unsupported_agent",
@@ -76,7 +79,7 @@ export class OpenCodeBackend {
           const conversation: Conversation = {
             id: randomUUID(),
             title: body.title ?? "Conversation",
-            agentId: body.agentId ?? "opencode",
+            target: body.target ?? { kind: "agent", id: "opencode" },
             projectId: body.projectId,
             createdAt: new Date().toISOString(),
           };
@@ -139,7 +142,7 @@ export class OpenCodeBackend {
           const run: Run = {
             id: randomUUID(),
             conversationId: conversation.id,
-            target: { kind: "agent", agentId: "opencode" },
+            target: { kind: "agent", id: "opencode" },
             status: "queued",
             input: body.content,
             createdAt: now,

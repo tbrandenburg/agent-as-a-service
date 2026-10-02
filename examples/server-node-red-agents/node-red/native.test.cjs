@@ -96,11 +96,12 @@ test('real worker host: multitab/subflow, authenticated async 202, authoritative
       try { assert.equal((await post({}, 'wrong')).status, 401); break; }
       catch (error) { if (Date.now() > deadline || child.exitCode !== null) throw new Error(`Worker startup: ${logs}`, { cause: error }); await new Promise((done) => setTimeout(done, 50)); }
     }
-    assert.equal((await post({ runId: 'other', target, input })).status, 400);
+    assert.equal((await post({ runId: 'other', entry: target, input })).status, 400);
+    assert.equal((await post({ runId: id, target, input })).status, 400);
     const before = Date.now();
-    assert.equal((await post({ runId: id, target, input })).status, 202);
+    assert.equal((await post({ runId: id, entry: target, input })).status, 202);
     assert.ok(Date.now() - before < 1000, 'dispatch must not wait for workflow');
-    assert.equal((await post({ runId: id, target, input })).status, 409);
+    assert.equal((await post({ runId: id, entry: target, input })).status, 409);
     if (crash) {
       const exit = new Promise((done) => child.once('exit', done));
       child.kill('SIGKILL');

@@ -1794,6 +1794,7 @@
       "get": {
         "operationId": "listConversations",
         "summary": "List conversations",
+        "description": "Filter by targetKind or targetId independently; when both are supplied, both must match.",
         "parameters": [
           {
             "in": "query",
@@ -1823,7 +1824,15 @@
           },
           {
             "in": "query",
-            "name": "agentId",
+            "name": "targetKind",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "targetId",
             "schema": {
               "type": "string",
               "minLength": 1
@@ -1852,10 +1861,23 @@
                             "nullable": true,
                             "minLength": 1
                           },
-                          "agentId": {
-                            "type": "string",
+                          "target": {
+                            "type": "object",
                             "nullable": true,
-                            "minLength": 1
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id"
+                            ]
                           },
                           "title": {
                             "type": "string",
@@ -2170,7 +2192,8 @@
       },
       "post": {
         "operationId": "createConversation",
-        "summary": "Create a conversation with an explicit or server-default agent",
+        "summary": "Create a conversation with an explicit or server-default conversation target",
+        "description": "The target identifies the logical owner, origin or default target. It may be omitted or null on observed conversations. Continuing a conversation does not imply rerunning its target; a backend may continue an established provider session directly.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2182,9 +2205,22 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "agentId": {
-                    "type": "string",
-                    "minLength": 1
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
+                    ]
                   },
                   "projectId": {
                     "type": "string",
@@ -2212,10 +2248,23 @@
                       "nullable": true,
                       "minLength": 1
                     },
-                    "agentId": {
-                      "type": "string",
+                    "target": {
+                      "type": "object",
                       "nullable": true,
-                      "minLength": 1
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "id"
+                      ]
                     },
                     "title": {
                       "type": "string",
@@ -2549,10 +2598,23 @@
                       "nullable": true,
                       "minLength": 1
                     },
-                    "agentId": {
-                      "type": "string",
+                    "target": {
+                      "type": "object",
                       "nullable": true,
-                      "minLength": 1
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "id"
+                      ]
                     },
                     "title": {
                       "type": "string",
@@ -2903,10 +2965,23 @@
                       "nullable": true,
                       "minLength": 1
                     },
-                    "agentId": {
-                      "type": "string",
+                    "target": {
+                      "type": "object",
                       "nullable": true,
-                      "minLength": 1
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "id"
+                      ]
                     },
                     "title": {
                       "type": "string",
@@ -3982,7 +4057,7 @@
       },
       "post": {
         "operationId": "sendMessage",
-        "summary": "Send a message to the conversation agent and start a tracked run",
+        "summary": "Send a conversation message and start a tracked run",
         "description": "On 202, the returned run is immediately readable through getRun. Acceptance does not promise agent completion within a fixed time. Oversized inline file content returns 413 payload_too_large. Idempotency-Key is scoped to the authenticated principal, HTTP method and resolved path. For at least 24 hours after acceptance, retries with the same key and identical body return the same status and body without repeating side effects. A different body for that key returns 409 idempotency_conflict. Concurrent retries cannot start duplicate work.",
         "parameters": [
           {
@@ -4241,45 +4316,20 @@
                           "minLength": 1
                         },
                         "target": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "agent"
-                                  ]
-                                },
-                                "agentId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "agentId"
-                              ]
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "workflow"
-                                  ]
-                                },
-                                "workflowId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "workflowId"
-                              ]
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
                           ]
                         },
                         "workflowVersion": {
@@ -7309,7 +7359,7 @@
     "/api/v1/runs": {
       "get": {
         "operationId": "listRuns",
-        "summary": "List agent and workflow runs",
+        "summary": "List runs",
         "parameters": [
           {
             "in": "query",
@@ -7342,10 +7392,7 @@
             "name": "targetKind",
             "schema": {
               "type": "string",
-              "enum": [
-                "agent",
-                "workflow"
-              ]
+              "minLength": 1
             }
           },
           {
@@ -7396,45 +7443,20 @@
                             "minLength": 1
                           },
                           "target": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "agent"
-                                    ]
-                                  },
-                                  "agentId": {
-                                    "type": "string",
-                                    "minLength": 1
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "agentId"
-                                ]
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "workflow"
-                                    ]
-                                  },
-                                  "workflowId": {
-                                    "type": "string",
-                                    "minLength": 1
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "workflowId"
-                                ]
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
                               }
+                            },
+                            "required": [
+                              "kind",
+                              "id"
                             ]
                           },
                           "workflowVersion": {
@@ -7802,7 +7824,7 @@
       },
       "post": {
         "operationId": "startRun",
-        "summary": "Start an agent or workflow run",
+        "summary": "Start a run",
         "description": "Only an explicit projectId selects a run working directory; omission means projectless/global and run.projectId is null, regardless of workflow or conversation project metadata. Every workflow may run in every accessible project. conversationId requests continuity only; it does not choose cwd. A run's separate process cwd does not isolate files, and overlapping runs may access the same directory. Nodes with absolute paths or their own path bases and workflow-created worktrees require explicit paths. Backends may reject unavailable or unauthorized projects before acceptance; project removal does not erase historical run attribution. On 202, the returned run is immediately readable through getRun. Acceptance does not promise execution completion within a fixed time. Oversized inline file content returns 413 payload_too_large. Idempotency-Key is scoped to the authenticated principal, HTTP method and resolved path. For at least 24 hours after acceptance, retries with the same key and identical body return the same status and body without repeating side effects. A different body for that key returns 409 idempotency_conflict. Concurrent retries cannot start duplicate work.",
         "parameters": [
           {
@@ -7830,45 +7852,20 @@
                     "$ref": "#/components/schemas/JsonValue"
                   },
                   "target": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "agent"
-                            ]
-                          },
-                          "agentId": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "agentId"
-                        ]
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "minLength": 1
                       },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "workflow"
-                            ]
-                          },
-                          "workflowId": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "workflowId"
-                        ]
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
                       }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
                     ]
                   },
                   "conversationId": {
@@ -7906,45 +7903,20 @@
                           "minLength": 1
                         },
                         "target": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "agent"
-                                  ]
-                                },
-                                "agentId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "agentId"
-                              ]
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "workflow"
-                                  ]
-                                },
-                                "workflowId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "workflowId"
-                              ]
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
                           ]
                         },
                         "workflowVersion": {
@@ -8454,7 +8426,7 @@
     "/api/v1/runs/{runId}": {
       "get": {
         "operationId": "getRun",
-        "summary": "Inspect an agent or workflow run, executions and interactions",
+        "summary": "Inspect a run, executions and interactions",
         "parameters": [
           {
             "in": "path",
@@ -8487,45 +8459,20 @@
                           "minLength": 1
                         },
                         "target": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "agent"
-                                  ]
-                                },
-                                "agentId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "agentId"
-                              ]
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "workflow"
-                                  ]
-                                },
-                                "workflowId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "workflowId"
-                              ]
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
                           ]
                         },
                         "workflowVersion": {
@@ -9366,45 +9313,20 @@
                           "minLength": 1
                         },
                         "target": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "agent"
-                                  ]
-                                },
-                                "agentId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "agentId"
-                              ]
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "workflow"
-                                  ]
-                                },
-                                "workflowId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "workflowId"
-                              ]
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
                           ]
                         },
                         "workflowVersion": {
@@ -9800,45 +9722,20 @@
                           "minLength": 1
                         },
                         "target": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "agent"
-                                  ]
-                                },
-                                "agentId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "agentId"
-                              ]
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "workflow"
-                                  ]
-                                },
-                                "workflowId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "workflowId"
-                              ]
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
                           ]
                         },
                         "workflowVersion": {
@@ -12067,45 +11964,20 @@
                           "minLength": 1
                         },
                         "target": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "agent"
-                                  ]
-                                },
-                                "agentId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "agentId"
-                              ]
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "kind": {
-                                  "type": "string",
-                                  "enum": [
-                                    "workflow"
-                                  ]
-                                },
-                                "workflowId": {
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              },
-                              "required": [
-                                "kind",
-                                "workflowId"
-                              ]
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
                             }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
                           ]
                         },
                         "workflowVersion": {
@@ -13232,45 +13104,20 @@
                     "minLength": 1
                   },
                   "target": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "agent"
-                            ]
-                          },
-                          "agentId": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "agentId"
-                        ]
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "minLength": 1
                       },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "workflow"
-                            ]
-                          },
-                          "workflowId": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "workflowId"
-                        ]
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
                       }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
                     ]
                   },
                   "workflowVersion": {

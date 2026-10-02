@@ -14,6 +14,8 @@ import {
   messageCreatedEvent,
   project,
   definition,
+  targetRef,
+  runTarget,
 } from "./v1/schemas/domain.js";
 import { contract } from "./index.js";
 describe("REST specification", () => {
@@ -140,8 +142,9 @@ describe("REST specification", () => {
     ).toBe(false);
     const identifier = "00000000-0000-4000-8000-000000000001";
     for (const target of [
-      { kind: "agent", agentId: identifier },
-      { kind: "workflow", workflowId: identifier },
+      { kind: "agent", id: identifier },
+      { kind: "workflow", id: identifier },
+      { kind: "pipeline", id: identifier },
     ])
       expect(
         runStart.safeParse({
@@ -167,7 +170,7 @@ describe("REST specification", () => {
     expect(
       runStart.safeParse({
         conversationId: identifier,
-        target: { kind: "workflow", workflowId: identifier },
+        target: { kind: "workflow", id: identifier },
         input: "Start workflow",
       }).success,
     ).toBe(true);
@@ -182,7 +185,7 @@ describe("REST specification", () => {
         run: {
           id: runId,
           projectId: null,
-          target: { kind: "agent", agentId: runId },
+          target: { kind: "agent", id: runId },
           workflowVersion: null,
           conversationId: null,
           status: "paused",
@@ -298,7 +301,7 @@ describe("REST specification", () => {
     const base = {
       id,
       projectId: null,
-      target: { kind: "agent", agentId: id },
+      target: { kind: "agent", id },
       workflowVersion: null,
       conversationId: null,
       input: "Hello",
@@ -330,22 +333,28 @@ describe("REST specification", () => {
       }).success,
     ).toBe(true);
   });
-  it("resolves a selected or default agent and links typed messages to runs", () => {
+  it("accepts a selected or default conversation target and links typed messages to runs", () => {
     const id = "00000000-0000-4000-8000-000000000001";
     const createBody = contract.conversations.createConversation.body;
     expect(createBody.safeParse({}).success).toBe(true);
     expect(createBody.safeParse({ title: "Default agent" }).success).toBe(true);
     expect(
-      createBody.safeParse({ title: "Selected agent", agentId: id }).success,
+      createBody.safeParse({
+        title: "Selected target",
+        target: { kind: "team", id },
+      }).success,
     ).toBe(true);
     expect(
-      createBody.safeParse({ title: "Invalid", agentId: "" }).success,
+      createBody.safeParse({
+        title: "Invalid",
+        target: { kind: "agent", id: "" },
+      }).success,
     ).toBe(false);
     expect(
       conversation.safeParse({
         id,
         projectId: null,
-        agentId: id,
+        target: { kind: "team", id },
         title: "Hi",
         createdAt: "2026-01-01T00:00:00Z",
       }).success,
@@ -375,7 +384,7 @@ describe("REST specification", () => {
       run: {
         id,
         projectId: null,
-        target: { kind: "agent", agentId: id },
+        target: { kind: "agent", id },
         workflowVersion: null,
         conversationId: id,
         status: "queued",
@@ -387,6 +396,62 @@ describe("REST specification", () => {
       },
     };
     expect(sentMessage.safeParse(response).success).toBe(true);
+  });
+  it("shares open targets and preserves nullish conversation metadata", () => {
+    expect(runTarget).toBe(targetRef);
+    for (const kind of ["workflow", "agent", "conversation", "pipeline"])
+      expect(targetRef.parse({ kind, id: "opaque" })).toEqual({
+        kind,
+        id: "opaque",
+      });
+    for (const target of [
+      { kind: "", id: "opaque" },
+      { kind: "team", id: "" },
+      { kind: "team" },
+      { id: "opaque" },
+      { kind: 1, id: "opaque" },
+      { kind: "team", id: 1 },
+    ]) {
+      expect(targetRef.safeParse(target).success).toBe(false);
+      expect(
+        contract.conversations.createConversation.body.safeParse({ target })
+          .success,
+      ).toBe(false);
+    }
+    for (const target of [undefined, null, { kind: "team", id: "opaque" }])
+      expect(
+        conversation.safeParse({
+          id: "chat",
+          title: "Observed",
+          createdAt: "2026-01-01T00:00:00Z",
+          target,
+        }).success,
+      ).toBe(true);
+    for (const query of [
+      {},
+      { targetKind: "pipeline" },
+      { targetId: "opaque" },
+      { targetKind: "pipeline", targetId: "opaque" },
+    ])
+      expect(
+        contract.conversations.listConversations.query.safeParse(query).success,
+      ).toBe(true);
+    expect(
+      contract.runs.listRuns.query.safeParse({ targetKind: "pipeline" })
+        .success,
+    ).toBe(true);
+    expect(
+      contract.runs.listRuns.query.safeParse({ targetKind: "" }).success,
+    ).toBe(false);
+    expect(
+      contract.conversations.listConversations.query.safeParse({
+        targetKind: "",
+      }).success,
+    ).toBe(false);
+    expect(
+      contract.conversations.listConversations.query.safeParse({ targetId: "" })
+        .success,
+    ).toBe(false);
   });
   it("defines resumable conversation events without requiring a run", () => {
     const stream = contract.conversations.streamConversationEvents;

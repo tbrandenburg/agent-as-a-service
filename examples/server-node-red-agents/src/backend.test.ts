@@ -7,12 +7,12 @@ import type { Executor } from "./backend.js";
 
 const auth = { authorization: "Bearer test-token" };
 const start = (text = "Release notes") => ({
-  target: { kind: "workflow", workflowId },
+  target: { kind: "workflow", id: workflowId },
   input: { text },
 });
 const node = (
   type: string,
-  nodeId = "writer-agent",
+  nodeId = "orchestrator",
   deploymentId = "generation-1",
 ) => ({
   version: 1,
@@ -22,12 +22,12 @@ const node = (
   nodeId,
   deploymentId,
   agent: "opencode",
-  agentName: "Writer",
+  agentName: "orchestrator",
 });
 const started = (
   runId: string,
   executionId = randomUUID(),
-  nodeId = "writer-agent",
+  nodeId = "orchestrator",
 ) => ({
   ...node("execution.started", nodeId),
   executionId,
@@ -85,6 +85,85 @@ const run = async (
 };
 
 describe("Node-RED lifecycle boundary", () => {
+  it("validates generic targets before resolving backend-supported kinds", async () => {
+    const { app } = await setup();
+    for (const target of [
+      { kind: "", id: workflowId },
+      { kind: "workflow", id: "" },
+      { kind: "workflow" },
+    ])
+      expect(
+        (
+          await request(app)
+            .post("/api/v1/runs")
+            .set(auth)
+            .send({ target, input: null })
+        ).status,
+      ).toBe(400);
+    const unsupported = await request(app)
+      .post("/api/v1/runs")
+      .set(auth)
+      .send({ target: { kind: "pipeline", id: "opaque" }, input: null });
+    expect(unsupported.status).toBe(501);
+    expect(unsupported.body.error.code).toBe("unsupported_target_kind");
+    const id = await run(app);
+    expect(
+      (await request(app).get(`/api/v1/runs/${id}`).set(auth)).body.run.target,
+    ).toEqual({ kind: "workflow", id: workflowId });
+    expect(
+      (
+        await request(app)
+          .get("/api/v1/runs")
+          .query({ targetKind: "workflow" })
+          .set(auth)
+      ).body.items.map((item: { id: string }) => item.id),
+    ).toEqual([id]);
+    expect(
+      (
+        await request(app)
+          .get("/api/v1/runs")
+          .query({ targetKind: "pipeline" })
+          .set(auth)
+      ).body.items,
+    ).toEqual([]);
+  });
+  it("exposes observed conversation targets and conjunctive generic filters", async () => {
+    const { backend, app } = await setup();
+    const id = await run(app);
+    expect(backend.observe(started(id)).status).toBe(200);
+    const second = await run(app);
+    expect(
+      backend.observe(started(second, randomUUID(), "review-agent")).status,
+    ).toBe(200);
+    const queries = [
+      [{ targetKind: "agent" }, 2],
+      [{ targetId: "orchestrator" }, 1],
+      [{ targetKind: "agent", targetId: "orchestrator" }, 1],
+      [{ targetKind: "workflow", targetId: "orchestrator" }, 0],
+      [{ targetId: "missing" }, 0],
+    ] as const;
+    for (const [query, count] of queries) {
+      const response = await request(app)
+        .get("/api/v1/conversations")
+        .query(query)
+        .set(auth);
+      expect(response.status).toBe(200);
+      expect(response.body.items).toHaveLength(count);
+      for (const item of response.body.items) {
+        expect(item.target.kind).toBe("agent");
+        expect(item).not.toHaveProperty("agentId");
+        expect(
+          (await request(app).get(`/api/v1/conversations/${item.id}`).set(auth))
+            .body.target,
+        ).toEqual(item.target);
+      }
+    }
+    for (const query of [{ targetKind: "" }, { targetId: "" }])
+      expect(
+        (await request(app).get("/api/v1/conversations").query(query).set(auth))
+          .status,
+      ).toBe(400);
+  });
   it("transports contract workflow inputs unchanged and completes non-agent outputs", async () => {
     const inputs = [
       "literal",
@@ -115,9 +194,15 @@ describe("Node-RED lifecycle boundary", () => {
       expect(dispatched[0]).toMatchObject({
         runId: id,
         input,
-        target: "workflow-in",
+        entry: "workflow-in",
       });
-      expect(dispatched[0].text).toBeUndefined();
+      expect(Object.keys(dispatched[0]).sort()).toEqual([
+        "cwd",
+        "entry",
+        "flows",
+        "input",
+        "runId",
+      ]);
       expect(backend.runs.get(id)?.run.input).toEqual(input);
       const output = [{ type: "data", data: { accepted: true } }];
       expect(backend.finalize({ ...done(id), output: undefined }).status).toBe(
@@ -127,8 +212,11 @@ describe("Node-RED lifecycle boundary", () => {
       expect(backend.runs.get(id)?.run.output).toEqual(output);
     }
   });
-  it("keeps direct agent input text-only", async () => {
-    const { app } = await setup();
+  it("rejects agent targets regardless of input without creating or dispatching work", async () => {
+    const dispatched: Parameters<Executor>[0][] = [];
+    const { app, backend } = await setup(async (payload) => {
+      dispatched.push(payload);
+    });
     for (const input of [
       "literal",
       { text: "prompt", extra: true },
@@ -139,9 +227,12 @@ describe("Node-RED lifecycle boundary", () => {
           await request(app)
             .post("/api/v1/runs")
             .set(auth)
-            .send({ target: { kind: "agent", agentId: "writer-agent" }, input })
+            .send({ target: { kind: "agent", id: "orchestrator" }, input })
         ).status,
-      ).toBe(400);
+      ).toBe(501);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(dispatched).toEqual([]);
+    expect(backend.runs.size).toBe(0);
   });
   it("stores ordered idempotent node observations separately from provider conversations and finalizer status", async () => {
     const { backend, app } = await setup();
@@ -493,17 +584,17 @@ describe("Node-RED lifecycle boundary", () => {
 
   it("maintains generation-safe inventory and repairs a missed deployment notice", async () => {
     const { backend, app } = await setup();
-    const old = node("node.deployed", "writer-agent", "old");
-    const newer = node("node.deployed", "writer-agent", "new");
+    const old = node("node.deployed", "orchestrator", "old");
+    const newer = node("node.deployed", "orchestrator", "new");
     expect(backend.observe(old).status).toBe(200);
     expect(backend.observe(newer).status).toBe(200);
     expect(
       backend.observe({ ...old, type: "node.closed", eventId: randomUUID() })
         .status,
     ).toBe(200);
-    expect(backend.inventory.get("writer-agent")?.deploymentId).toBe("new");
+    expect(backend.inventory.get("orchestrator")?.deploymentId).toBe("new");
     backend.observe({ ...old, eventId: randomUUID() });
-    expect(backend.inventory.get("writer-agent")?.deploymentId).toBe("new");
+    expect(backend.inventory.get("orchestrator")?.deploymentId).toBe("new");
     const id = await run(app);
     expect(
       backend.observe({ ...started(id), deploymentId: "old" }).status,
@@ -517,7 +608,7 @@ describe("Node-RED lifecycle boundary", () => {
       backend.observe({ ...started(id), deploymentId: "new" }).status,
     ).toBe(409);
     expect(backend.observe(started(id)).status).toBe(200);
-    expect(backend.inventory.get("writer-agent")?.deploymentId).toBe(
+    expect(backend.inventory.get("orchestrator")?.deploymentId).toBe(
       "generation-1",
     );
   });

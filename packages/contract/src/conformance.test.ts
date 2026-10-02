@@ -58,6 +58,7 @@ const routes = {
   createProject: contract.projects.createProject,
   sendMessage: contract.conversations.sendMessage,
   createWorkflow: contract.workflows.createWorkflow,
+  createConversation: contract.conversations.createConversation,
 };
 const examples = z
   .array(
@@ -68,6 +69,7 @@ const examples = z
         "createProject",
         "sendMessage",
         "createWorkflow",
+        "createConversation",
       ]),
       kind: z.enum(["request", "response"]),
       status: z.number().optional(),
@@ -146,7 +148,12 @@ describe("published contract conformance", () => {
     ["numeric input", { input: 2 }, true],
     ["generic object array", { input: [{ type: "text", text: "" }] }, true],
     ["unknown envelope field", { inputs: "wrong" }, false],
-    ["empty target ID", { target: { kind: "agent", agentId: "" } }, false],
+    ["open target kind", { target: { kind: "pipeline", id: "opaque" } }, true],
+    ["empty target ID", { target: { kind: "agent", id: "" } }, false],
+    ["empty target kind", { target: { kind: "", id: "opaque" } }, false],
+    ["missing target ID", { target: { kind: "team" } }, false],
+    ["invalid target kind", { target: { kind: 1, id: "opaque" } }, false],
+    ["invalid target ID", { target: { kind: "team", id: 1 } }, false],
   ])("agrees on %s", (_name, value, valid) => {
     expect(schemas.runStart.safeParse(value).success).toBe(valid);
     expect(publishedRequest(value)).toBe(valid);

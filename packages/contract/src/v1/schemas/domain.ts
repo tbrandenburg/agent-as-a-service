@@ -21,10 +21,11 @@ export const contentPart = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("data"), data: z.record(z.unknown()) }),
 ]);
+export const targetRef = z.object({ kind: z.string().min(1), id });
 export const conversation = z.object({
   id,
   projectId: id.nullish(),
-  agentId: id.nullish(),
+  target: targetRef.nullish(),
   title: z.string().min(1),
   createdAt: timestamp,
 });
@@ -80,10 +81,7 @@ export const runStatus = z.enum([
   "cancelled",
 ]);
 export const runInput = jsonValue;
-export const runTarget = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("agent"), agentId: id }),
-  z.object({ kind: z.literal("workflow"), workflowId: id }),
-]);
+export const runTarget = targetRef;
 export const runOutput = jsonValue;
 export const run = z.object({
   id,

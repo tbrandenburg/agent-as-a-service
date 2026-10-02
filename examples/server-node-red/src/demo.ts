@@ -81,7 +81,7 @@ if (invalid.status !== 200 || invalid.body.valid || !invalid.body.errors.length)
 
 title(4, "Accept run, read immediately, and verify real flow output");
 const accepted = await startRun(api, {
-  target: { kind: "workflow", workflowId: "node-red-demo" },
+  target: { kind: "workflow", id: "node-red-demo" },
   input: { text: "hello" },
 });
 status(accepted.status, 202, "start run");
@@ -176,7 +176,7 @@ reject(
 );
 reject(
   await startRun(api, {
-    target: { kind: "workflow", workflowId: "unknown" },
+    target: { kind: "workflow", id: "unknown" },
     input: { text: "hello" },
   }),
   404,
@@ -185,7 +185,7 @@ reject(
 );
 reject(
   await startRun(api, {
-    target: { kind: "workflow", workflowId: "node-red-demo" },
+    target: { kind: "workflow", id: "node-red-demo" },
     input: { text: "" },
   }),
   400,

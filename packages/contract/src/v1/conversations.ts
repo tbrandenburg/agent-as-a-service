@@ -10,21 +10,27 @@ export const conversations = t.router({
     path: "/api/v1/conversations",
     query: c.pagination.extend({
       projectId: c.id.optional(),
-      agentId: c.id.optional(),
+      targetKind: d.targetRef.shape.kind.optional(),
+      targetId: c.id.optional(),
     }),
     responses: { 200: c.page(d.conversation), ...c.errors },
     summary: "List conversations",
+    description:
+      "Filter by targetKind or targetId independently; when both are supplied, both must match.",
   },
   createConversation: {
     method: "POST",
     path: "/api/v1/conversations",
     body: z.object({
       title: z.string().min(1).optional(),
-      agentId: c.id.optional(),
+      target: d.targetRef.optional(),
       projectId: c.id.optional(),
     }),
     responses: { 201: d.conversation, ...c.errors },
-    summary: "Create a conversation with an explicit or server-default agent",
+    summary:
+      "Create a conversation with an explicit or server-default conversation target",
+    description:
+      "The target identifies the logical owner, origin or default target. It may be omitted or null on observed conversations. Continuing a conversation does not imply rerunning its target; a backend may continue an established provider session directly.",
   },
   getConversation: {
     method: "GET",
@@ -65,7 +71,7 @@ export const conversations = t.router({
     }),
     body: d.sendMessageInput,
     responses: { 202: d.sentMessage, ...c.errors, ...c.payloadTooLarge },
-    summary: "Send a message to the conversation agent and start a tracked run",
+    summary: "Send a conversation message and start a tracked run",
     description: `On 202, the returned run is immediately readable through getRun. Acceptance does not promise agent completion within a fixed time. Oversized inline file content returns 413 payload_too_large. ${c.idempotencyDescription}`,
   },
   streamConversationEvents: {

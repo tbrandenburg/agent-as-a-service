@@ -125,7 +125,7 @@ async function launch(job) {
   const global = await realpath("/data/agent-work");
   const cwd = await realpath(job.cwd);
   if ((cwd !== global && !cwd.startsWith(`${root}/`)) || !(await stat(cwd)).isDirectory()) throw new Error("Working directory outside allowed roots");
-  if (!Array.isArray(job.flows) || !job.flows.length || typeof job.runId !== "string" || (job.target ? typeof job.target !== "string" : job.path !== "/agent/writer-agent")) throw new Error("Invalid worker snapshot");
+  if (!Array.isArray(job.flows) || !job.flows.length || typeof job.runId !== "string" || typeof job.entry !== "string" || !job.entry || Object.keys(job).some((key) => !["runId", "input", "entry", "flows", "cwd"].includes(key))) throw new Error("Invalid worker snapshot");
   const dir = await mkdtemp(join(tmpdir(), "aaas-worker-"));
   try {
     await symlink("/data/node_modules", join(dir, "node_modules"));
@@ -164,7 +164,7 @@ async function launch(job) {
     const activated = await fetch(`http://127.0.0.1:${port}/activate`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(5000) });
     if (!activated.ok) throw new Error("Worker observer could not activate");
     checkStopped(job.runId);
-    const response = await fetch(`http://127.0.0.1:${port}${job.target ? "/invoke" : job.path}`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(job.target ? { runId: job.runId, input: job.input, target: job.target } : { runId: job.runId, text: job.text, sessionID: job.sessionID }), signal: AbortSignal.timeout(10_000) });
+    const response = await fetch(`http://127.0.0.1:${port}/invoke`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ runId: job.runId, input: job.input, entry: job.entry }), signal: AbortSignal.timeout(10_000) });
     if (response.status !== 202) throw new Error("Worker dispatch rejected");
   } catch (error) {
     stopped.add(job.runId);

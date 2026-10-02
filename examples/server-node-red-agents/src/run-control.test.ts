@@ -29,7 +29,7 @@ const setup = async (
       },
     });
   const body: z.infer<typeof schemas.runStart> = {
-    target: { kind: "workflow", workflowId: workflow.body.id as string },
+    target: { kind: "workflow", id: workflow.body.id as string },
     input: null,
   };
   const begin = async (
@@ -57,10 +57,10 @@ const observation = (runId: string) => ({
   type: "execution.started",
   eventId: randomUUID(),
   timestamp: new Date().toISOString(),
-  nodeId: "writer-agent",
+  nodeId: "orchestrator",
   deploymentId: "deployment",
   agent: "opencode",
-  agentName: "Writer",
+  agentName: "orchestrator",
   executionId: randomUUID(),
   agentObservation: { runId },
   input: { invocation: "prompt", prompt: "remember" },
@@ -160,13 +160,13 @@ describe("Node-RED run controls", () => {
     },
   );
 
-  it("cancels direct agents using the same stop boundary", async () => {
+  it("cancels Core using the same stop boundary", async () => {
     const stops: string[] = [];
     const { app, begin } = await setup(async (id) => {
       stops.push(id);
     });
     const accepted = await begin({
-      target: { kind: "agent", agentId: "writer-agent" },
+      target: { kind: "workflow", id: "core" },
       input: { text: "wait" },
     });
     const id = accepted.body.run.id as string;
@@ -328,7 +328,7 @@ describe("Node-RED run controls", () => {
     expect(backend.runs.has(id)).toBe(false);
   });
 
-  it("deleting a direct run preserves conversation history and provider session continuation", async () => {
+  it("deleting a Core run preserves conversation history while continuation stays unsupported", async () => {
     const dispatched: Parameters<Executor>[0][] = [];
     const { backend, app } = await setup(
       async () => {},
@@ -337,7 +337,7 @@ describe("Node-RED run controls", () => {
       },
     );
     const body = {
-      target: { kind: "agent", agentId: "writer-agent" },
+      target: { kind: "workflow", id: "core" },
       input: { text: "remember" },
     };
     const accepted = await request(app)
@@ -383,9 +383,9 @@ describe("Node-RED run controls", () => {
           .set(auth)
           .send({ ...body, conversationId })
       ).status,
-    ).toBe(202);
+    ).toBe(501);
     await tick();
-    expect(dispatched[1].sessionID).toBe("private-session");
+    expect(dispatched).toHaveLength(1);
     expect(backend.finalize(final(id)).status).toBe(409);
     expect(backend.runs.has(id)).toBe(false);
   });

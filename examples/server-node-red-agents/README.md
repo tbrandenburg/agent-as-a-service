@@ -58,7 +58,7 @@ Start with:
 
 ```json
 {
-  "target": { "kind": "workflow", "workflowId": "<created-id>" },
+  "target": { "kind": "workflow", "id": "<created-id>" },
   "input": { "a": 13.75, "b": -8 }
 }
 ```
@@ -102,7 +102,7 @@ DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=dev-token make demo-node-red-a
 
 The provider-free HTTP script builds production images without a home seed and records statuses, ETags, opaque workflow/run IDs, versions and typed outputs. It exercises multitab/cross-tab Links/subflows, Function/Change/Switch/startup nodes, generic JSON, runtime failures and non-JSON results, stale updates, concurrent mutation snapshots, deletion and history. Run-control acceptance cancels an observed slow Function and an immediately accepted run, verifies unconfirmed observations and worker absence after the original delay, checks released capacity, resume conflicts, active/terminal deletion and identical accepted-start replay after deletion. The pinned runtime suite checks native Link Call lookup/timeout, host authentication/async acceptance, exact snapshots, output rejection, crash/shutdown, observation and deterministic stop/start capacity races. Exec/File/custom-node cwd proof stays in `/examples/server-node-red-agents/node-red/fixtures/cwd.json`.
 
-The provider demo creates a native agent workflow through the API and verifies overlapping runs, readable observed conversations, project cwd and direct-agent continuation after deleting the preceding terminal run, with retained history and provider-confirmed `resumed: true`. The separate `make demo-node-red` example remains independent.
+The provider demo resolves built-in Core, verifies its read-only guards, overlapping native runs, orchestrator observations, readable user/assistant messages, project cwd and retained history after terminal-run deletion. It then runs `/examples/server-node-red-agents/src/conversations-demo.ts`: metadata CRUD, bootstrap, confirmed resume, current custom-agent configuration drift, upstream File-node sentinel/no replay, whole-run busy guard, runtime failure, cancellation, idempotency and project cwd/unavailable-path assertions. Run that script alone against your own fresh provider-capable instance with `DEFAULT_MODEL=github-copilot/gpt-6-luna DEMO_COMPOSE_PROJECT=<project> DEMO_BASE_URL=<url> API_TOKEN=<token> node --import tsx examples/server-node-red-agents/src/conversations-demo.ts`. It uses real HTTP, Node-RED and provider calls, and prints run/conversation IDs and evidence markers. The separate `make demo-node-red` example remains independent.
 
 ## Observation and worker lifecycle
 
@@ -114,13 +114,27 @@ Worker `onReceive`, `onComplete` and `onSend` hooks create opaque per-invocation
 
 Enable native metrics with `NODE_RED_WORKER_METRICS=true`. Logs retain Node-RED fields under `[worker runId=<id>]`; receive/send indicates activity, not completion. Inspect your project's logs and `/runs/<id>/events?after=0` when diagnosing failures. Metrics add no public API fields.
 
-## Projects and direct sessions
+## Projects and Core conversations
 
 Project provisioning supports `{}`/empty, clone from public HTTPS GitHub URLs, and registration of existing directories under `/data/projects`. Optional safe `folderName` selects an unused directory independently of display name. Legacy `repositoryUrl`/`localPath` forms remain accepted. Rename changes only display name; delete unregisters after active runs finish and never erases files. Missing directories are unavailable to new runs; symlink escapes and paths outside the project root are rejected.
 
 Only explicit `run.projectId` chooses cwd; omission uses `/data/agent-work` and `run.projectId: null`. Workflow metadata/conversation IDs do not select a directory. Same-project runs may overlap. File/Exec/process-relative nodes inherit worker cwd; absolute paths and node-specific bases do not. This is process isolation, not filesystem isolation. A workflow-created worktree does not change cwd.
 
-The configured direct target is `{kind:"agent",agentId:"writer-agent"}` with `{text:"..."}` input. A fresh run needs no conversation; acknowledged agent execution creates one. Continue with its public `conversationId` in the original directory; unsupported cross-directory resume returns `409 conversation_directory_conflict` before acceptance. Other agent IDs return typed `501`. Private provider sessions stay in the instance data volume and are never exposed as conversation IDs.
+Primary runs support workflow targets only. Built-in `{kind:"workflow",id:"core"}` is version 1, named Core and exposed exactly once by workflow list/get with `readOnly:true`; update/delete return `403 workflow_read_only`. Core is server-owned and never persisted in the user registry. Its native flow is `Link In → orchestrator → Link Out(return)`, executed through the same snapshot/worker/Link Call path as user workflows. The agent reads typed `msg.input.text`, selects its model from `DEFAULT_MODEL`, and has no node cwd override. Only agent output 1 returns success; output 2 progress is unconnected to the return boundary.
+
+Start Core with `{"target":{"kind":"workflow","id":"core"},"input":{"text":"Reply briefly"}}`. A fresh run needs no conversation; acknowledged agent execution creates one with `target: {kind:"agent",id:"orchestrator"}` metadata and the originating run's project ID. Unknown workflows return `404`; other target kinds return `501 unsupported_target_kind` without dispatch. `startRun` with `conversationId` returns `501 conversation_continuation_unsupported`. Private provider sessions are captured by ordinary observations and never exposed as public conversation IDs.
+
+## Conversation turns
+
+`POST /conversations` creates metadata only; omitted target or explicit `{kind:"workflow",id:"core"}` selects Core. Other create targets are rejected. An optional project must exist. List supports conjunctive project/target filters, PATCH changes only title, and DELETE tombstones an inactive conversation. Deleted resources/messages return 404, while historical messages, runs and private continuation state remain internally retained. Any linked queued/running/paused run blocks deletion (`409 conversation_active`) and new turns (`409 conversation_busy`), including downstream work after the originating agent finishes.
+
+`POST /conversations/:id/messages` accepts `{"content":"Plain text"}`; structured parts are rejected before work. Its `202 {message,run}` contains a stable provisional user message and an immediately readable new run with `conversationId` and **no target**. The first pre-created Core turn runs current Core without requiring resume. Later turns load the exact stored source workflow/node ID, require its current type to be `agent`, and copy only that current node into `Link In → agent → Link Out(return)` with progress unwired. Only prompt/session invocation plumbing is overridden; input is the new text and private session ID. No original workflow, upstream effects, config dependencies or msg/flow/global state are reconstructed. Missing/deleted/retyped source returns `409 conversation_not_resumable`; dynamic configuration/runtime incompatibility fails the accepted new run normally. Historical workflow run results/events stay immutable.
+
+Later turns require `resumed:true`; false/missing confirmation fails with `resume_unconfirmed`. Provider output/session is staged until successful run finalization, then exactly the accepted user message and one assistant reply enter history and emit `message.created`. Failed/cancelled/unconfirmed turns persist neither message and retain the old session, including cancellation after terminal observation but before finalization. Workflow-originated observations retain their existing immediate history behavior.
+
+The conversation's public project ID selects its current registered cwd for every turn; rename does not move it, and unavailable project/path fails before acceptance. Private state consists of session, exact source locator and tombstone; no continuation profile or duplicate directory is retained. State/history/cache disappear on API restart.
+
+Idempotency uses the single authenticated principal, HTTP method, resolved endpoint path and key. Identical retries return the immutable original acceptance for at least 24 hours even after failure, cancellation or soft deletion; changed bodies return `409 idempotency_conflict`. The same raw key on `/runs` or another conversation is independent. Conversation SSE remains typed 501.
 
 For extended project CRUD/capacity/provider acceptance, create `/data/projects/existing-fixture` in your own fresh instance, then run `DEFAULT_MODEL=github-copilot/gpt-6-luna DEMO_COMPOSE_PROJECT=<project> DEMO_BASE_URL=<url> API_TOKEN=<token> node --import tsx examples/server-node-red-agents/src/projects-demo.ts`.
 
@@ -128,10 +142,10 @@ For extended project CRUD/capacity/provider acceptance, create `/data/projects/e
 
 `POST /api/v1/runs/:runId/cancel` claims a queued/running/paused run, closes unfinished node observations as `unconfirmed`, and waits for its isolated worker/process group to stop before returning `200 {run}` with status `cancelled`. Pending launches are stopped too; late finalizers, observations and expected exits cannot overwrite the claim. An optional `{reason}` is recorded in `run.cancelled` event data, not `run.error`. Unknown runs return `404`; terminal runs return `409 run_not_active`. An uncertain shutdown returns `503 worker_stop_failed`, retains the cancellation claim and active capacity, and permits retry; it never reports successful cancellation while execution may remain live.
 
-`POST /api/v1/runs/:runId/resume` is implemented but current runs return `409 run_not_resumable` (`404` if unknown). No workflow is replayed. A future suspension producer may supply an executor-owned opaque continuation for a paused run; the runtime would continue the same public run without AaaS interpreting the graph. Direct-agent conversation continuation starts a separate run and is independent of run resume.
+`POST /api/v1/runs/:runId/resume` is implemented but current runs return `409 run_not_resumable` (`404` if unknown). No workflow is replayed. A future suspension producer may supply an executor-owned opaque continuation for a paused run; the runtime would continue the same public run without AaaS interpreting the graph. Future conversation continuation is independent of run resume.
 
 `DELETE /api/v1/runs/:runId` accepts completed/failed/rejected/cancelled runs and removes their public detail, events and run-scoped bookkeeping. Active runs return `409 run_active`; unknown/deleted runs return `404`. Conversation/messages, provider sessions, project files and workflow definitions survive. Accepted `Idempotency-Key` responses remain identical for at least 24 hours, even after deletion; their historical run ID then returns `404` rather than dispatching duplicate work. Histories/cache are in-memory and restart limitations still apply.
 
-Direct chat writes, SSE, artifacts, interactions, conversation editing and run persistence return typed `501`. Inventory does not grant direct invocability.
+SSE, artifacts, interactions and run persistence return typed `501`. Inventory does not grant direct invocability.
 
 Primary sources: [native complete flow representation](https://nodered.org/docs/api/admin/types), [complete editor export](https://nodered.org/docs/user-guide/editor/workspace/import-export), [Link Call semantics](https://nodered.org/docs/user-guide/writing-functions#calling-link-nodes).

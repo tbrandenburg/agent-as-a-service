@@ -1,7 +1,6 @@
 [
   {"id":"agents-tab","type":"tab","label":"Core","disabled":false,"info":"Native Link Call: input.text -> one agent -> returned payload"},
-  {"id":"workflow-in","type":"link in","z":"agents-tab","x":100,"y":100,"name":"Core invocation","links":[],"wires":[["core-agent"]]},
-  {"id":"core-agent","type":"agent","z":"agents-tab","x":250,"y":100,"name":"Core agent","agent":"opencode","runtime":"direct","invocation":"prompt","model":"DEFAULT_MODEL","modelType":"env","prompt":"input.text","promptType":"msg","timeout":"","timeoutType":"num","concurrency":4,"retryMaxAttempts":2,"auto":false,"wires":[["workflow-return"],["workflow-return"]]},
-  {"id":"workflow-return","type":"link out","z":"agents-tab","x":450,"y":100,"name":"Core return","mode":"return","links":[],"wires":[]},
-  {"id":"agent-catch","type":"catch","z":"agents-tab","x":250,"y":200,"name":"Return node failure","scope":["core-agent"],"uncaught":false,"wires":[["workflow-return"]]}
+  {"id":"workflow-in","type":"link in","z":"agents-tab","x":100,"y":100,"name":"Core invocation","links":[],"wires":[["orchestrator"]]},
+  {"id":"orchestrator","type":"agent","z":"agents-tab","x":250,"y":100,"name":"orchestrator","agent":"opencode","runtime":"direct","invocation":"prompt","model":"DEFAULT_MODEL","modelType":"env","prompt":"input.text","promptType":"msg","timeout":"","timeoutType":"num","concurrency":4,"retryMaxAttempts":2,"auto":false,"wires":[["workflow-return"],[]]},
+  {"id":"workflow-return","type":"link out","z":"agents-tab","x":450,"y":100,"name":"Core return","mode":"return","links":[],"wires":[]}
 ]

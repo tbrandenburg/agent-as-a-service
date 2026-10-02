@@ -58,7 +58,7 @@ const definitions = await api.workflows.listWorkflows({
 });
 if (definitions.status === 200 && definitions.body.items[0]) {
   const workflow = await startRun(api, {
-    target: { kind: "workflow", workflowId: definitions.body.items[0].id },
+    target: { kind: "workflow", id: definitions.body.items[0].id },
     input: "Run the review workflow",
   });
   if (workflow.status === 202)

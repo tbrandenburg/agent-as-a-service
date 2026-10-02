@@ -97,8 +97,8 @@ export class DemoStore {
       projectId,
       conversationId,
       target: workflow
-        ? { kind: "workflow", workflowId: this.workflow.id }
-        : { kind: "agent", agentId: this.agent.getType() },
+        ? { kind: "workflow", id: this.workflow.id }
+        : { kind: "agent", id: this.agent.getType() },
       ...(workflow ? { workflowVersion: this.workflow.version } : {}),
       status: "queued",
       input,

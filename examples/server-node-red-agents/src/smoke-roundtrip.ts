@@ -46,7 +46,7 @@ export async function smokeRoundtrip(
     const accepted = await measure("runAcceptanceMs", () =>
       api.runs.startRun({
         headers: { "idempotency-key": randomUUID() },
-        body: { target: { kind: "workflow", workflowId }, input },
+        body: { target: { kind: "workflow", id: workflowId }, input },
         ...options(),
       }),
     );

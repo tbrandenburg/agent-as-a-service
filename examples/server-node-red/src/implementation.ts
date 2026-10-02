@@ -110,7 +110,7 @@ export class NodeRedBackend {
         startRun: async ({ body, headers }) => {
           if (
             body.target?.kind === "workflow" &&
-            body.target.workflowId !== workflow.id
+            body.target.id !== workflow.id
           )
             return missing("Workflow");
           if (body.target?.kind !== "workflow")

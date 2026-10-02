@@ -30,6 +30,111 @@ export const input = (name = "Native") => ({
 });
 
 describe("stored native workflows", () => {
+  it("resolves Core once without persisting it, guards mutation and snapshots idempotent starts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaas-core-registry-"));
+    try {
+      const disk = new JsonStore(join(root, "workflows.json"));
+      const payloads: Parameters<Executor>[0][] = [];
+      const backend = new AgentsBackend(async (payload) => {
+        payloads.push(payload);
+      }, disk);
+      await backend.initialize();
+      const app = createApp({
+        token: "test-token",
+        implementation: backend.implementation(),
+      });
+      const core = await request(app).get("/api/v1/workflows/core").set(auth);
+      expect(core.status).toBe(200);
+      expect(core.headers.etag).toBe('"v1"');
+      expect(core.body).toMatchObject({
+        id: "core",
+        name: "Core",
+        version: 1,
+        readOnly: true,
+      });
+      expect(validate(core.body)).toEqual([]);
+      for (const method of ["put", "delete"] as const) {
+        const response = await request(app)
+          [method]("/api/v1/workflows/core")
+          .set(auth)
+          .send(method === "put" ? input() : undefined);
+        expect(response.status).toBe(403);
+        expect(response.body.error.code).toBe("workflow_read_only");
+      }
+      const created = await request(app)
+        .post("/api/v1/workflows")
+        .set(auth)
+        .send(input());
+      expect(created.status).toBe(201);
+      expect(Object.keys(await disk.load())).toEqual([created.body.id]);
+      const listed = await request(app).get("/api/v1/workflows").set(auth);
+      expect(listed.body.items.map((item: { id: string }) => item.id)).toEqual([
+        "core",
+        created.body.id,
+      ]);
+      const body = {
+        target: { kind: "workflow", id: "core" },
+        input: { text: "Reply briefly" },
+      };
+      const accepted = await request(app)
+        .post("/api/v1/runs")
+        .set({ ...auth, "idempotency-key": "core-start" })
+        .send(body);
+      expect(accepted.status).toBe(202);
+      expect(accepted.body.run).toMatchObject({
+        workflowVersion: 1,
+        target: body.target,
+      });
+      expect(
+        (
+          await request(app)
+            .get(`/api/v1/runs/${accepted.body.run.id}`)
+            .set(auth)
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await request(app)
+            .post("/api/v1/runs")
+            .set({ ...auth, "idempotency-key": "core-start" })
+            .send(body)
+        ).body,
+      ).toEqual(accepted.body);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(payloads).toHaveLength(1);
+      expect(payloads[0]).toMatchObject({
+        entry: "workflow-in",
+        input: body.input,
+        flows: core.body.specification.flows,
+      });
+      payloads[0].flows[0].label = "Changed snapshot";
+      expect(
+        (await request(app).get("/api/v1/workflows/core").set(auth)).body,
+      ).toEqual(core.body);
+      const rejected = await request(app)
+        .post("/api/v1/runs")
+        .set(auth)
+        .send({ ...body, conversationId: "unknown" });
+      expect(rejected.status).toBe(501);
+      expect(rejected.body.error.code).toBe(
+        "conversation_continuation_unsupported",
+      );
+      expect(
+        (
+          await request(app)
+            .post("/api/v1/runs")
+            .set(auth)
+            .send({ ...body, target: { kind: "workflow", id: "unknown" } })
+        ).status,
+      ).toBe(404);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(payloads).toHaveLength(1);
+      expect(backend.runs.size).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("validates only envelope and selected Link In", () => {
     const native = input();
     native.specification.flows.push(
@@ -96,7 +201,7 @@ describe("stored native workflows", () => {
       const run = await request(app)
         .post("/api/v1/runs")
         .set(auth)
-        .send({ target: { kind: "workflow", workflowId: id }, input: null });
+        .send({ target: { kind: "workflow", id }, input: null });
       expect(run.status).toBe(202);
       expect(run.body.run.workflowVersion).toBe(1);
       const mutations = await Promise.all(
@@ -172,13 +277,13 @@ describe("stored native workflows", () => {
           await request(app)
             .post("/api/v1/runs")
             .set(auth)
-            .send({ target: { kind: "workflow", workflowId: id }, input: true })
+            .send({ target: { kind: "workflow", id }, input: true })
         ).status,
       ).toBe(404);
       expect(await disk.load()).toEqual({});
       expect(
         (await request(app).get("/api/v1/workflows").set(auth)).body.items,
-      ).toEqual([]);
+      ).toMatchObject([{ id: "core", readOnly: true }]);
       expect(
         (await request(app).get("/api/v1/workflows/toString").set(auth)).status,
       ).toBe(404);

@@ -62,7 +62,7 @@ requireStatus(conversation.status, 201, "createConversation");
 if (conversation.status !== 201) throw new Error("Missing conversation");
 line(
   "Conversation",
-  `${conversation.body.id} · agent ${conversation.body.agentId} · HTTP 201`,
+  `${conversation.body.id} · agent ${conversation.body.target?.id} · HTTP 201`,
 );
 
 title(3, "Ask for concrete advice and read the accepted run");
@@ -224,7 +224,7 @@ const badContent = await fetch(
 );
 requireStatus(badContent.status, 400, "unsupported content parts");
 const unknownAgent = await api.conversations.createConversation({
-  body: { agentId: "unsupported-agent" },
+  body: { target: { kind: "agent", id: "unsupported-agent" } },
 });
 requireStatus(unknownAgent.status, 400, "unsupported agent");
 const unsupportedProject = await api.conversations.createConversation({
