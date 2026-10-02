@@ -4,6 +4,7 @@ import type { z } from "zod";
 import type { Store } from "./registry.js";
 import { snapshot, validate } from "./native.js";
 import { core } from "./core.js";
+import { continuation } from "./continuation.js";
 import type { Definition, Input, Registry, Specification } from "./native.js";
 import { Projects, ProjectError } from "./projects.js";
 import { notImplementedRoutes } from "../../server-express/src/index.js";
@@ -48,6 +49,13 @@ type Execution = {
 };
 type Job = {
   run: Run;
+  turn?: {
+    message: Message;
+    expectResume: boolean;
+    source: { workflowId: string; nodeId: string };
+    result?: { content: string; sessionId?: string };
+    error?: string;
+  };
   cancelRequested: boolean;
   stopping: boolean;
   dispatched: boolean;
@@ -144,11 +152,19 @@ export class AgentsBackend {
   private readonly phases = new Map<string, { body: string; result: Result }>();
   private readonly executionOwners = new Map<string, string>();
   private readonly sessions = new Map<string, string>();
-  private readonly sessionDirectories = new Map<string, string>();
+  private readonly sources = new Map<
+    string,
+    { workflowId: string; nodeId: string }
+  >();
+  private readonly deleted = new Set<string>();
   private readonly finals = new Map<string, { body: string; result: Result }>();
   private readonly keys = new Map<
     string,
-    { body: string; response: Detail; expires: number }
+    {
+      body: string;
+      response: Detail | z.infer<typeof schemas.sentMessage>;
+      expires: number;
+    }
   >();
   private registry: Registry = {};
   private mutation = Promise.resolve();
@@ -178,6 +194,24 @@ export class AgentsBackend {
   private definition(id: string): Definition | undefined {
     if (id === core.id) return core;
     return Object.hasOwn(this.registry, id) ? this.registry[id] : undefined;
+  }
+
+  private live(id: string) {
+    return this.deleted.has(id) ? undefined : this.conversations.get(id);
+  }
+
+  private busy(id: string) {
+    return [...this.runs.values()].some(
+      ({ run, conversations }) =>
+        active(run) &&
+        (run.conversationId === id ||
+          conversations?.some((link) => link.conversationId === id)),
+    );
+  }
+
+  // The example authenticates one principal; never retain its bearer token.
+  private key(path: string, key?: string) {
+    return key ? canonical(["api-principal", "POST", path, key]) : undefined;
   }
 
   private guard(id: string, match?: string) {
@@ -531,8 +565,14 @@ export class AgentsBackend {
       runId: run.id,
       createdAt: new Date().toISOString(),
     };
-    this.messages.get(id)!.push(message);
-    this.conversationEvent(id, run, "message.created", { message });
+    this.persist(message, run);
+  }
+
+  private persist(message: Message, run: Run) {
+    this.messages.get(message.conversationId)!.push(message);
+    this.conversationEvent(message.conversationId, run, "message.created", {
+      message,
+    });
   }
 
   /** Private callback only; no observation endpoint is registered on the public API. */
@@ -637,9 +677,15 @@ export class AgentsBackend {
         this.deployments.get(observation.nodeId) ?? new Set<string>();
       generations.add(observation.deploymentId);
       this.deployments.set(observation.nodeId, generations);
-      const id = randomUUID();
+      if (
+        job.turn &&
+        (job.executions.size || observation.nodeId !== job.turn.source.nodeId)
+      )
+        return reject("Unexpected conversation execution");
+      const id = job.turn?.message.conversationId ?? randomUUID();
       const conversation: Conversation = {
         id,
+        projectId: job.run.projectId ?? null,
         target: { kind: "agent", id: observation.nodeId },
         title: observation.agentName || `${observation.nodeId} conversation`,
         createdAt: new Date().toISOString(),
@@ -649,12 +695,18 @@ export class AgentsBackend {
         this.messages.set(id, []);
         this.conversationEvents.set(id, []);
       }
-      this.add(
-        id,
-        "user",
-        (observation.input.prompt ?? observation.input.args)!,
-        job.run,
-      );
+      if (!job.turn)
+        this.sources.set(id, {
+          workflowId: job.run.target!.id,
+          nodeId: observation.nodeId,
+        });
+      if (!job.turn)
+        this.add(
+          id,
+          "user",
+          (observation.input.prompt ?? observation.input.args)!,
+          job.run,
+        );
       job.executions.set(observation.executionId, {
         conversationId: id,
         nodeId: observation.nodeId,
@@ -705,21 +757,28 @@ export class AgentsBackend {
     )
       return reject("Invalid successful output");
     execution.terminal = observation.status;
-    if (observation.status === "completed" && text(observation.sessionID))
-      this.sessions.set(execution.conversationId, observation.sessionID);
-    if (observation.status === "completed" && text(observation.sessionID)) {
-      const directory = this.jobs.get(runId)?.cwd;
-      if (directory)
-        this.sessionDirectories.set(execution.conversationId, directory);
-    }
-    if (observation.status === "completed")
+    if (job.turn) {
+      if (observation.status !== "completed") job.failed = true;
+      else if (job.turn.expectResume && observation.resumed !== true) {
+        job.turn.error = "resume_unconfirmed";
+        job.failed = true;
+      } else
+        job.turn.result = {
+          content: observation.output!.payload as string,
+          sessionId: text(observation.sessionID)
+            ? observation.sessionID
+            : undefined,
+        };
+    } else if (observation.status === "completed") {
+      if (text(observation.sessionID))
+        this.sessions.set(execution.conversationId, observation.sessionID);
       this.add(
         execution.conversationId,
         "assistant",
         observation.output!.payload as string,
         job.run,
       );
-    else job.failed = true;
+    } else job.failed = true;
     this.event(
       job.run,
       "execution.terminal",
@@ -766,6 +825,7 @@ export class AgentsBackend {
     if (!job || !this.writable(job, "running"))
       return reject("Run is not active");
     if (
+      !job.turn &&
       value.status === "completed" &&
       (job.failed ||
         [...job.executions.values()].some(
@@ -773,15 +833,29 @@ export class AgentsBackend {
         ))
     )
       return reject("Unacknowledged execution");
-    if (value.status === "completed")
+    const succeeded =
+      value.status === "completed" &&
+      !job.failed &&
+      (!job.turn || !!job.turn.result);
+    if (succeeded && job.turn) {
+      const { message, result, source } = job.turn;
+      this.persist(message, job.run);
+      this.add(message.conversationId, "assistant", result!.content, job.run);
+      if (result!.sessionId)
+        this.sessions.set(message.conversationId, result!.sessionId);
+      this.sources.set(message.conversationId, source);
+    }
+    if (succeeded)
       this.update(job.run, "completed", {
         output: schemas.runOutput.parse(value.output),
       });
     else
       this.update(job.run, "failed", {
         error: {
-          code: "workflow_failed",
-          message: "The workflow could not complete",
+          code: job.turn?.error ?? "workflow_failed",
+          message: job.turn?.error
+            ? "Provider resume was not confirmed"
+            : "The workflow could not complete",
         },
       });
     for (const execution of job.executions.values())
@@ -1005,11 +1079,14 @@ export class AgentsBackend {
         deleteRun: async ({ params }) => this.deleteRun(params.runId),
         startRun: ({ body, headers }) =>
           this.serial(async () => {
-            const key = headers["idempotency-key"];
+            const key = this.key("/api/v1/runs", headers["idempotency-key"]);
             const previous = key && this.keys.get(key);
             if (previous && previous.expires > Date.now())
               return previous.body === canonical(body)
-                ? { status: 202, body: structuredClone(previous.response) }
+                ? {
+                    status: 202,
+                    body: structuredClone(previous.response as Detail),
+                  }
                 : {
                     status: 409,
                     body: {
@@ -1149,16 +1226,199 @@ export class AgentsBackend {
       },
       conversations: {
         ...notImplementedRoutes.conversations,
+        createConversation: ({ body }) =>
+          this.serial(async () => {
+            if (
+              body.target &&
+              (body.target.kind !== "workflow" || body.target.id !== "core")
+            )
+              return invalid(
+                "Only Core conversations can be created explicitly",
+              );
+            if (body.projectId && !this.projects?.get(body.projectId))
+              return missing("Project");
+            const conversation: Conversation = {
+              id: randomUUID(),
+              projectId: body.projectId ?? null,
+              target: { kind: "workflow", id: "core" },
+              title: body.title ?? "New conversation",
+              createdAt: new Date().toISOString(),
+            };
+            this.conversations.set(conversation.id, conversation);
+            this.messages.set(conversation.id, []);
+            this.conversationEvents.set(conversation.id, []);
+            return { status: 201, body: structuredClone(conversation) };
+          }),
+        updateConversation: ({ params, body }) =>
+          this.serial(async () => {
+            const conversation = this.live(params.conversationId);
+            if (!conversation) return missing("Conversation");
+            conversation.title = body.title;
+            return { status: 200, body: structuredClone(conversation) };
+          }),
+        deleteConversation: ({ params }) =>
+          this.serial(async () => {
+            if (!this.live(params.conversationId))
+              return missing("Conversation");
+            if (this.busy(params.conversationId))
+              return errorResponse(
+                409,
+                "conversation_active",
+                "Conversation has an active run",
+              );
+            this.deleted.add(params.conversationId);
+            return { status: 200, body: { success: true } };
+          }),
+        sendMessage: ({ params, body, headers }) =>
+          this.serial(async () => {
+            const id = params.conversationId;
+            const key = this.key(
+              `/api/v1/conversations/${id}/messages`,
+              headers["idempotency-key"],
+            );
+            const previous = key && this.keys.get(key);
+            if (previous && previous.expires > Date.now())
+              return previous.body === canonical(body)
+                ? {
+                    status: 202,
+                    body: structuredClone(
+                      previous.response as z.infer<typeof schemas.sentMessage>,
+                    ),
+                  }
+                : errorResponse(
+                    409,
+                    "idempotency_conflict",
+                    "Key already used for another body",
+                  );
+            const conversation = this.live(id);
+            if (!conversation) return missing("Conversation");
+            if (typeof body.content !== "string")
+              return invalid("Only plain string content is supported");
+            const content = body.content;
+            if (this.busy(id))
+              return errorResponse(
+                409,
+                "conversation_busy",
+                "Conversation has an active run",
+              );
+            const sessionID = this.sessions.get(id);
+            if (sessionID && !this.sources.has(id))
+              return errorResponse(
+                409,
+                "conversation_not_resumable",
+                "Conversation source is unavailable",
+              );
+            const source = this.sources.get(id) ?? {
+              workflowId: "core",
+              nodeId: "orchestrator",
+            };
+            const definition = this.definition(source.workflowId);
+            const node =
+              definition &&
+              snapshot(definition).flows.find(
+                (node) => node.id === source.nodeId && node.type === "agent",
+              );
+            if (
+              (!sessionID && conversation.target?.kind !== "workflow") ||
+              (!sessionID && conversation.target?.id !== "core") ||
+              !node
+            )
+              return errorResponse(
+                409,
+                "conversation_not_resumable",
+                "Conversation source is unavailable",
+              );
+            if (
+              [...this.jobs.values()].filter((job) => active(job.run)).length >=
+              this.maxWorkers
+            )
+              return errorResponse(
+                503,
+                "workers_busy",
+                "Maximum concurrent execution workers reached",
+              );
+            let cwd: string | undefined;
+            if (this.projects) {
+              try {
+                cwd = await this.projects.cwd(
+                  conversation.projectId ?? undefined,
+                );
+              } catch (error) {
+                return this.projectError(error);
+              }
+            } else if (conversation.projectId) return missing("Project");
+            const accepted = sessionID ? continuation(node) : snapshot(core);
+            const now = new Date().toISOString();
+            const run: Run = {
+              id: randomUUID(),
+              conversationId: id,
+              projectId: conversation.projectId ?? null,
+              input: { text: body.content },
+              status: "queued",
+              createdAt: now,
+              updatedAt: now,
+            };
+            const message: z.infer<typeof schemas.sentMessage>["message"] = {
+              id: randomUUID(),
+              conversationId: id,
+              role: "user",
+              content: body.content,
+              runId: run.id,
+              createdAt: now,
+            };
+            const job: Job = {
+              run,
+              turn: { message, expectResume: !!sessionID, source },
+              cancelRequested: false,
+              stopping: false,
+              dispatched: false,
+              cwd,
+              executions: new Map(),
+              failed: false,
+              nodeSequence: 0,
+              nodeBatches: new Map(),
+              nodeExecutions: new Map(),
+              nodeDrained: false,
+            };
+            this.jobs.set(run.id, job);
+            this.runs.set(run.id, {
+              run,
+              executions: [],
+              conversations: [{ conversationId: id, nodeId: source.nodeId }],
+            });
+            this.events.set(run.id, []);
+            this.update(run, "queued");
+            const response = structuredClone({ message, run });
+            if (key)
+              this.keys.set(key, {
+                body: canonical(body),
+                response,
+                expires: Date.now() + 86_400_000,
+              });
+            this.update(run, "running");
+            setImmediate(
+              () =>
+                void this.send(
+                  job,
+                  { text: content, ...(sessionID ? { sessionID } : {}) },
+                  accepted.entry,
+                  cwd,
+                  accepted.flows,
+                ),
+            );
+            return { status: 202, body: response };
+          }),
         getConversation: async ({ params }) => {
-          const conversation = this.conversations.get(params.conversationId);
+          const conversation = this.live(params.conversationId);
           return conversation
-            ? { status: 200, body: conversation }
+            ? { status: 200, body: structuredClone(conversation) }
             : missing("Conversation");
         },
         listConversations: async ({ query }) => {
           const page = this.page(
             [...this.conversations.values()].filter(
               (item) =>
+                !this.deleted.has(item.id) &&
                 (!query.targetKind || item.target?.kind === query.targetKind) &&
                 (!query.targetId || item.target?.id === query.targetId) &&
                 (!query.projectId || item.projectId === query.projectId),
@@ -1169,6 +1429,7 @@ export class AgentsBackend {
           return page ? { status: 200, body: page } : invalid("Invalid cursor");
         },
         listMessages: async ({ params, query }) => {
+          if (!this.live(params.conversationId)) return missing("Conversation");
           const items = this.messages.get(params.conversationId);
           if (!items) return missing("Conversation");
           const page = this.page(items, query.cursor, query.limit);

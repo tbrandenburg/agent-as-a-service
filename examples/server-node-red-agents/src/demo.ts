@@ -181,3 +181,4 @@ assert.equal(
 console.log(
   "Real Core workflows, orchestrator observation, project cwd and history retention passed",
 );
+await import("./conversations-demo.js");
