@@ -8,6 +8,11 @@ const { tmpdir } = require("node:os");
 const workers = new Map();
 const starting = new Set();
 const waiting = new Set();
+const pending = new Map();
+// Permanent IDs cannot be reused during this supervisor lifetime. Pending
+// promises/reservations are transient; tombstones carry no worker resources.
+const stopped = new Set();
+function checkStopped(id) { if (stopped.has(id)) throw new Error("Execution worker stopped"); }
 const max = Number(process.env.MAX_WORKERS ?? "4");
 if (!Number.isSafeInteger(max) || max < 1 || max > 32) throw new Error("Invalid MAX_WORKERS");
 const capacityWaitMs = 20_000;
@@ -17,6 +22,7 @@ function notifyRelease() { for (const wake of released) wake(); released.clear()
 async function waitForSlot(id) {
   const deadline = Date.now() + capacityWaitMs;
   while (workers.size + starting.size >= max) {
+    checkStopped(id);
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error("Worker capacity wait timed out");
     await new Promise((resolve) => {
@@ -25,6 +31,7 @@ async function waitForSlot(id) {
       released.add(wake);
     });
   }
+  checkStopped(id);
   // Reserve synchronously before another awakened waiter can inspect capacity.
   starting.add(id);
 }
@@ -54,6 +61,14 @@ async function failed(id) {
   }
 }
 async function stop(id) {
+  if (typeof id !== "string" || !id) throw new Error("Invalid execution worker");
+  stopped.add(id);
+  notifyRelease();
+  const launching = pending.get(id);
+  if (launching) await launching;
+  await stopWorker(id);
+}
+async function stopWorker(id) {
   const worker = workers.get(id);
   if (!worker) return;
   if (worker.stopping) return worker.stopping;
@@ -81,7 +96,7 @@ async function cleanup(id, worker) {
   signal("SIGTERM");
   await Promise.race([worker.exit, sleep(5000)]);
   signal("SIGKILL");
-  await worker.exit;
+  await Promise.race([worker.exit, sleep(5000).then(() => { if (!worker.exited) throw new Error("Worker termination unconfirmed"); })]);
   await rm(worker.dir, { recursive: true, force: true });
   workers.delete(id);
   notifyRelease();
@@ -89,13 +104,20 @@ async function cleanup(id, worker) {
 async function start(job, launchWorker = launch) {
   const id = job.runId;
   if (typeof id !== "string" || !id || workers.has(id) || starting.has(id) || waiting.has(id)) throw new Error("Duplicate or invalid execution worker");
+  checkStopped(id);
+  let settle;
+  pending.set(id, new Promise((resolve) => { settle = resolve; }));
   waiting.add(id);
   try {
     await waitForSlot(id);
+    checkStopped(id);
     await launchWorker(job);
+    checkStopped(id);
   } finally {
     waiting.delete(id);
     if (starting.delete(id)) notifyRelease();
+    pending.delete(id);
+    settle();
   }
 }
 async function launch(job) {
@@ -115,12 +137,13 @@ async function launch(job) {
       socket.once("error", reject);
       socket.listen(0, "127.0.0.1", () => { const chosen = socket.address().port; socket.close(() => resolve(chosen)); });
     });
+    checkStopped(job.runId);
     const child = spawn("node", ["/seed/worker-host.js", dir, String(port), job.runId], { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true, env: { ...process.env, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
     forwardWorkerOutput(child.stdout, process.stdout, job.runId);
     forwardWorkerOutput(child.stderr, process.stderr, job.runId);
     const worker = { child, dir, port, group: child.pid, exited: false, exit: null, timeout: null };
     worker.exit = new Promise((resolve) => {
-      const settled = () => { worker.exited = true; resolve(); if (workers.has(job.runId)) void failed(job.runId).finally(() => stop(job.runId)); };
+      const settled = () => { worker.exited = true; resolve(); if (workers.has(job.runId) && !stopped.has(job.runId)) void failed(job.runId).finally(() => stop(job.runId)); };
       child.once("exit", settled);
       child.once("error", settled);
     });
@@ -128,6 +151,7 @@ async function launch(job) {
     workers.set(job.runId, worker);
     starting.delete(job.runId);
     for (let attempt = 0; attempt < 150; attempt++) {
+      checkStopped(job.runId);
       if (worker.exited) throw new Error("Worker exited before ready");
       try {
         const ready = await fetch(`http://127.0.0.1:${port}/ready`, { signal: AbortSignal.timeout(500) });
@@ -136,12 +160,15 @@ async function launch(job) {
       if (attempt === 149) throw new Error("Worker readiness timeout");
       await sleep(200);
     }
+    checkStopped(job.runId);
     const activated = await fetch(`http://127.0.0.1:${port}/activate`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}` }, signal: AbortSignal.timeout(5000) });
     if (!activated.ok) throw new Error("Worker observer could not activate");
+    checkStopped(job.runId);
     const response = await fetch(`http://127.0.0.1:${port}${job.target ? "/invoke" : job.path}`, { method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(job.target ? { runId: job.runId, input: job.input, target: job.target } : { runId: job.runId, text: job.text, sessionID: job.sessionID }), signal: AbortSignal.timeout(10_000) });
     if (response.status !== 202) throw new Error("Worker dispatch rejected");
   } catch (error) {
-    await stop(job.runId);
+    stopped.add(job.runId);
+    await stopWorker(job.runId);
     await rm(dir, { recursive: true, force: true });
     throw error;
   }
@@ -174,6 +201,6 @@ async function read(request) {
   }
   return JSON.parse(Buffer.concat(parts, size).toString("utf8"));
 }
-if (require.main === module) process.on("SIGTERM", () => { for (const id of workers.keys()) void stop(id); });
+if (require.main === module) process.on("SIGTERM", () => { for (const id of new Set([...workers.keys(), ...pending.keys()])) void stop(id); });
 async function writeSnapshot(dir, flows) { await writeFile(join(dir, "flows.json"), JSON.stringify(flows)); }
-module.exports = { stop, start, workers, server, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit };
+module.exports = { stop, start, workers, pending, starting, waiting, server, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit };

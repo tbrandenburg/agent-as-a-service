@@ -47,6 +47,9 @@ type Execution = {
 };
 type Job = {
   run: Run;
+  cancelRequested: boolean;
+  stopping: boolean;
+  dispatched: boolean;
   cwd?: string;
   executions: Map<string, Execution>;
   failed: boolean;
@@ -158,6 +161,8 @@ const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown): value is string =>
   typeof value === "string" && !!value.trim();
+const active = (run: Run) =>
+  ["queued", "running", "paused"].includes(run.status);
 const canonical = (value: unknown): string =>
   JSON.stringify(value, (_key, item: unknown) =>
     record(item)
@@ -359,8 +364,81 @@ export class AgentsBackend {
   }
 
   private update(run: Run, status: Run["status"], patch: Partial<Run> = {}) {
+    if (!active(run)) return;
     Object.assign(run, patch, { status, updatedAt: new Date().toISOString() });
     this.event(run, "run.updated", { status });
+  }
+
+  private writable(job: Job, status?: Run["status"]) {
+    return (
+      this.jobs.get(job.run.id) === job &&
+      active(job.run) &&
+      !job.cancelRequested &&
+      (!status || job.run.status === status)
+    );
+  }
+
+  private async cancel(id: string, reason?: string) {
+    const job = this.jobs.get(id);
+    if (!job) return missing("Run");
+    if (!active(job.run))
+      return errorResponse(409, "run_not_active", "Run is not active");
+    if (job.stopping)
+      return errorResponse(
+        409,
+        "run_cancel_pending",
+        "Run cancellation is pending",
+      );
+    // Claim synchronously; shutdown I/O must not hold the global mutation queue.
+    job.cancelRequested = true;
+    job.stopping = true;
+    this.closeNodes(job);
+    try {
+      if (job.dispatched) {
+        if (!this.stopWorker) throw new Error("Worker stop unavailable");
+        await this.stopWorker(id);
+      }
+      this.update(job.run, "cancelled");
+      this.event(
+        job.run,
+        "run.cancelled",
+        reason === undefined ? {} : { reason },
+      );
+      for (const execution of job.executions.values())
+        this.conversationEvent(
+          execution.conversationId,
+          job.run,
+          "run.updated",
+          {
+            run: structuredClone(job.run),
+          },
+        );
+      return { status: 200 as const, body: { run: structuredClone(job.run) } };
+    } catch {
+      // Retain the claim on failure: callbacks cannot disguise an uncertain stop.
+      return errorResponse(
+        503,
+        "worker_stop_failed",
+        "Execution worker could not be stopped",
+      );
+    } finally {
+      job.stopping = false;
+    }
+  }
+
+  private deleteRun(id: string) {
+    const job = this.jobs.get(id);
+    if (!job) return missing("Run");
+    if (active(job.run))
+      return errorResponse(409, "run_active", "Run is active");
+    this.runs.delete(id);
+    this.events.delete(id);
+    this.jobs.delete(id);
+    this.finals.delete(id);
+    for (const execution of job.executions.keys())
+      this.executionOwners.delete(execution);
+    // Accepted start responses and conversation/provider state outlive the run.
+    return { status: 200 as const, body: { success: true } };
   }
 
   /** Bounded, ordered private worker callback; a retry must replay exactly the same batch. */
@@ -596,7 +674,7 @@ export class AgentsBackend {
       return existing.body === body
         ? existing.result
         : reject("Conflicting execution phase");
-    if (!job || job.run.status !== "running")
+    if (!job || !this.writable(job, "running"))
       return reject("Run is not active");
     const owner = this.executionOwners.get(observation.executionId);
     if (owner && owner !== runId)
@@ -757,7 +835,7 @@ export class AgentsBackend {
         ? prior.result
         : reject("Conflicting finalization");
     const job = this.jobs.get(value.runId);
-    if (!job || job.run.status !== "running")
+    if (!job || !this.writable(job, "running"))
       return reject("Run is not active");
     if (
       value.status === "completed" &&
@@ -794,7 +872,10 @@ export class AgentsBackend {
     this.finals.set(value.runId, { body, result });
     if (this.stopWorker)
       setImmediate(
-        () => void this.stopWorker!(value.runId as string).catch(() => {}),
+        () =>
+          void this.stopWorker!(value.runId as string).catch(() => {
+            console.error("Finalized execution worker cleanup failed");
+          }),
       );
     return result;
   }
@@ -802,7 +883,7 @@ export class AgentsBackend {
   workerFailed(id: string) {
     const job = this.jobs.get(id);
     if (job && !job.nodeDrained) this.closeNodes(job, "worker_failed");
-    if (job && ["queued", "running"].includes(job.run.status))
+    if (job && this.writable(job))
       this.update(job.run, "failed", {
         error: { code: "worker_failed", message: "Execution worker stopped" },
       });
@@ -829,6 +910,8 @@ export class AgentsBackend {
     flows: Specification["flows"] = [],
     sessionID?: string,
   ) {
+    if (!this.writable(job, "running")) return;
+    job.dispatched = true;
     try {
       await this.dispatch({
         runId: job.run.id,
@@ -842,8 +925,9 @@ export class AgentsBackend {
       });
       // A start can arrive before the dispatch response.
     } catch (error) {
-      if (job.run.status === "running") this.closeNodes(job, "dispatch_failed");
-      if (job.run.status === "running")
+      if (this.writable(job, "running"))
+        this.closeNodes(job, "dispatch_failed");
+      if (this.writable(job, "running"))
         this.update(job.run, "failed", {
           error: {
             code:
@@ -985,6 +1069,19 @@ export class AgentsBackend {
       },
       runs: {
         ...notImplementedRoutes.runs,
+        cancelRun: async ({ params, body }) =>
+          this.cancel(params.runId, body?.reason),
+        resumeRun: async ({ params }) => {
+          if (!this.runs.has(params.runId)) return missing("Run");
+          // Future: paused + executor-owned opaque continuation -> runtime resume
+          // of the same public run. Native workflow replay is not continuation.
+          return errorResponse(
+            409,
+            "run_not_resumable",
+            "Run has no resumable execution state",
+          );
+        },
+        deleteRun: async ({ params }) => this.deleteRun(params.runId),
         startRun: ({ body, headers }) =>
           this.serial(async () => {
             const key = headers["idempotency-key"];
@@ -1107,6 +1204,9 @@ export class AgentsBackend {
             this.update(run, "queued");
             const job: Job = {
               run,
+              cancelRequested: false,
+              stopping: false,
+              dispatched: false,
               cwd,
               executions: new Map(),
               failed: false,

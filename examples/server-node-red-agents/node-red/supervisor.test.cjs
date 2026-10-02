@@ -6,7 +6,7 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { Readable, PassThrough } = require("node:stream");
 const { test } = require("node:test");
-const { stop, start, workers, server, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit } = require("./supervisor.js");
+const { stop, start, workers, pending, starting, waiting, server, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit } = require("./supervisor.js");
 
 test("complete native worker snapshot is written unchanged including tabs, subflows and background nodes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "aaas-snapshot-"));
@@ -225,3 +225,75 @@ test("failed startup releases its reservation for another waiting worker", async
 });
 
 test.after(() => server.close());
+
+test("stop before start rejects future starts without retaining transient state", async () => {
+  await Promise.all([stop("before-launch"), stop("before-launch")]);
+  let launched = false;
+  await assert.rejects(start({ runId: "before-launch" }, async () => { launched = true; }), /stopped/);
+  assert.equal(launched, false);
+  assert.equal(workers.has("before-launch"), false);
+  assert.equal(pending.size, 0);
+});
+
+test("stop wakes a capacity waiter without waiting for unrelated workers", async () => {
+  for (let index = 0; index < 4; index++) {
+    workers.set(`stop-occupied-${index}`, { child: { exitCode: 0 }, dir: await mkdtemp(join(tmpdir(), "aaas-wait-stop-")), exited: true, exit: Promise.resolve() });
+  }
+  try {
+    let launched = false;
+    const launch = start({ runId: "stop-waiting" }, async () => { launched = true; });
+    const rejection = assert.rejects(launch, /stopped/);
+    assert.equal(waiting.has("stop-waiting"), true);
+    await stop("stop-waiting");
+    await rejection;
+    assert.equal(launched, false);
+    assert.equal(workers.size, 4);
+    assert.equal(waiting.size, 0);
+    assert.equal(starting.size, 0);
+    assert.equal(pending.size, 0);
+  } finally { for (const id of workers.keys()) await stop(id); }
+});
+
+test("stop after reservation but before launch prevents spawning and releases capacity", async () => {
+  let launched = false;
+  const launch = start({ runId: "stop-reserved" }, async () => { launched = true; });
+  const rejection = assert.rejects(launch, /stopped/);
+  assert.equal(starting.has("stop-reserved"), true);
+  await stop("stop-reserved");
+  await rejection;
+  assert.equal(launched, false);
+  await start({ runId: "after-reserved" }, async () => {});
+  assert.equal(starting.size, 0);
+  assert.equal(pending.size, 0);
+});
+
+test("duplicate stop awaits an asynchronous launch boundary then terminates its child", async () => {
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const ready = new Promise((resolve) => { entered = resolve; });
+  const id = "stop-launching";
+  const launch = start({ runId: id }, async () => {
+    entered();
+    await gate;
+    const dir = await mkdtemp(join(tmpdir(), "aaas-launch-stop-"));
+    const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { stdio: "ignore" });
+    const worker = { child, dir, exited: false };
+    worker.exit = new Promise((resolve) => child.once("exit", () => { worker.exited = true; resolve(); }));
+    workers.set(id, worker);
+  });
+  const rejection = assert.rejects(launch, /stopped/);
+  await ready;
+  let settled = false;
+  const first = stop(id).then(() => { settled = true; });
+  const second = stop(id);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  release();
+  await Promise.all([first, second, rejection]);
+  assert.equal(workers.has(id), false);
+  await assert.rejects(start({ runId: id }, async () => {}), /stopped/);
+  assert.equal(pending.size, 0);
+  assert.equal(starting.size, 0);
+  assert.equal(waiting.size, 0);
+});

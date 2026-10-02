@@ -99,6 +99,31 @@ assert.ok(
     first.run.output.includes(project.body.localPath!),
 );
 const conversationId = first.conversations![0].conversationId;
+assert.equal(
+  (await api.runs.deleteRun({ params: { runId: first.run.id } })).status,
+  200,
+);
+assert.equal(
+  (await api.runs.getRun({ params: { runId: first.run.id } })).status,
+  404,
+);
+assert.equal(
+  (await api.conversations.getConversation({ params: { conversationId } }))
+    .status,
+  200,
+);
+const history = await api.conversations.listMessages({
+  params: { conversationId },
+  query: { limit: 100 },
+});
+assert.equal(history.status, 200);
+if (history.status === 200) {
+  assert.ok(history.body.items.some((message) => message.role === "user"));
+  assert.ok(history.body.items.some((message) => message.role === "assistant"));
+}
+console.log(
+  `Deleted terminal direct run=${first.run.id}; conversation=${conversationId} and history retained`,
+);
 const continued = await startRun(api, {
   projectId: project.body.id,
   conversationId,

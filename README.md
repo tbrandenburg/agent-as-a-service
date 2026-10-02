@@ -54,6 +54,8 @@ make demo-express
 
 `make smoke-node-red-agents` runs one provider-free multiplication roundtrip against a fresh Docker instance using the typed HTTP contract client. It verifies `13.75 × -8 = -110`, prints phase timings and a machine-readable `SMOKE_RESULT` JSON record, and removes its own containers, volumes and image tags. See [smoke timing definitions](/examples/server-node-red-agents/README.md#timed-contract-smoke).
 
+The Node-RED agents example supports run cancellation and terminal-run deletion while preserving conversation/session continuity and accepted-start idempotency. Run resume returns `409 run_not_resumable` until the executor supports real suspension. See [run controls](/examples/server-node-red-agents/README.md#run-controls).
+
 To start the default example server instead:
 
 ```sh
