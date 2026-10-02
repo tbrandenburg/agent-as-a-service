@@ -38,11 +38,11 @@ app.post("/activate", authenticate, (_request, response) => { observer.activate(
 app.get("/ready", (_request, response) => response.json({ ready: true }));
 app.post("/invoke", authenticate, express.json({ limit: "1mb" }), (request, response) => {
   const body = request.body;
-  if (!body || body.runId !== runId || typeof body.target !== "string" || !body.target || !runInput.safeParse(body.input).success || Object.keys(body).some((key) => !["runId", "input", "target"].includes(key))) return response.status(400).json({ error: "Invalid invocation" });
+  if (!body || body.runId !== runId || typeof body.entry !== "string" || !body.entry || !runInput.safeParse(body.input).success || Object.keys(body).some((key) => !["runId", "input", "entry"].includes(key))) return response.status(400).json({ error: "Invalid invocation" });
   if (invoked) return response.status(409).json({ error: "Worker already invoked" });
   invoked = true;
   // The host control state is authoritative, regardless of returned flow fields.
-  const operation = caller.call(body.target, { input: body.input, agentObservation: { runId } }, { timeout });
+  const operation = caller.call(body.entry, { input: body.input, agentObservation: { runId } }, { timeout });
   response.status(202).json({ accepted: true });
   void operation.then((message) => {
     if (message.error || (message.agentExecution && message.agentExecution.status !== "completed")) throw new Error("Workflow node failed");

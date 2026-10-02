@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { createClient, startRun } from "../../client/src/index.js";
 
 const base = process.env.DEMO_BASE_URL;
@@ -10,18 +9,37 @@ if (process.env.DEFAULT_MODEL !== "github-copilot/gpt-6-luna")
     "Use DEFAULT_MODEL=github-copilot/gpt-6-luna for provider acceptance",
   );
 const api = createClient(base, token);
-const flows: Record<string, unknown>[] = JSON.parse(
-  await readFile(new URL("../node-red/flows.json", import.meta.url), "utf8"),
-);
-const created = await api.workflows.createWorkflow({
-  body: {
-    name: "Native agent",
-    engine: "node-red",
-    specification: { entry: "workflow-in", flows },
-  },
+const core = await api.workflows.getWorkflow({
+  params: { workflowId: "core" },
 });
-assert.equal(created.status, 201);
-if (created.status !== 201) throw new Error("Workflow create failed");
+assert.equal(core.status, 200);
+if (core.status !== 200) throw new Error("Core lookup failed");
+assert.equal(core.body.readOnly, true);
+assert.equal(core.body.version, 1);
+const listed = await api.workflows.listWorkflows({ query: { limit: 100 } });
+assert.equal(listed.status, 200);
+if (listed.status === 200)
+  assert.equal(
+    listed.body.items.filter((workflow) => workflow.id === "core").length,
+    1,
+  );
+assert.equal(
+  (await api.workflows.deleteWorkflow({ params: { workflowId: "core" } }))
+    .status,
+  403,
+);
+assert.equal(
+  (
+    await api.workflows.updateWorkflow({
+      params: { workflowId: "core" },
+      body: {
+        engine: core.body.engine,
+        specification: core.body.specification,
+      },
+    })
+  ).status,
+  403,
+);
 const poll = async (id: string) => {
   const deadline = Date.now() + 480_000;
   while (Date.now() < deadline) {
@@ -38,6 +56,14 @@ const poll = async (id: string) => {
       );
       assert.equal(typeof result.body.run.output, "string");
       assert.ok(result.body.run.output);
+      if (
+        !result.body.executions?.some(
+          (execution) => execution.key === "orchestrator",
+        )
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
       assert.equal(result.body.conversations?.length, 1);
       const link = result.body.conversations![0];
       const messages = await api.conversations.listMessages({
@@ -45,10 +71,14 @@ const poll = async (id: string) => {
         query: { limit: 10 },
       });
       assert.equal(messages.status, 200);
-      if (messages.status === 200)
+      if (messages.status === 200) {
+        assert.ok(
+          messages.body.items.some((message) => message.role === "user"),
+        );
         assert.ok(
           messages.body.items.some((message) => message.role === "assistant"),
         );
+      }
       console.log(
         `Provider run=${id} status=completed version=${result.body.run.workflowVersion ?? "-"} conversation=${link.conversationId}`,
       );
@@ -65,7 +95,7 @@ const prompts = [
 const accepted = await Promise.all(
   prompts.map((text) =>
     startRun(api, {
-      target: { kind: "workflow", id: created.body.id },
+      target: { kind: "workflow", id: "core" },
       input: { text },
     }),
   ),
@@ -74,26 +104,26 @@ for (const response of accepted) {
   assert.equal(response.status, 202);
   if (response.status !== 202) throw new Error("Workflow run rejected");
   const result = await poll(response.body.run.id);
-  assert.equal(result.conversations![0].nodeId, "core-agent");
+  assert.equal(result.conversations![0].nodeId, "orchestrator");
   assert.ok(
-    result.executions?.some((execution) => execution.key === "core-agent"),
+    result.executions?.some((execution) => execution.key === "orchestrator"),
   );
 }
 const project = await api.projects.createProject({
-  body: { name: "Direct session acceptance" },
+  body: { name: "Core project acceptance" },
 });
 assert.equal(project.status, 201);
 if (project.status !== 201) throw new Error("Project create failed");
-const direct = await startRun(api, {
+const bootstrap = await startRun(api, {
   projectId: project.body.id,
-  target: { kind: "agent", id: "writer-agent" },
+  target: { kind: "workflow", id: "core" },
   input: {
-    text: "Run pwd and include its exact output in your reply. Remember the word juniper.",
+    text: "Run pwd and include its exact output in your reply.",
   },
 });
-assert.equal(direct.status, 202);
-if (direct.status !== 202) throw new Error("Direct run rejected");
-const first = await poll(direct.body.run.id);
+assert.equal(bootstrap.status, 202);
+if (bootstrap.status !== 202) throw new Error("Core run rejected");
+const first = await poll(bootstrap.body.run.id);
 assert.ok(
   typeof first.run.output === "string" &&
     first.run.output.includes(project.body.localPath!),
@@ -122,51 +152,26 @@ if (history.status === 200) {
   assert.ok(history.body.items.some((message) => message.role === "assistant"));
 }
 console.log(
-  `Deleted terminal direct run=${first.run.id}; conversation=${conversationId} and history retained`,
+  `Deleted terminal Core run=${first.run.id}; conversation=${conversationId} and history retained`,
 );
-const continued = await startRun(api, {
-  projectId: project.body.id,
-  conversationId,
-  target: { kind: "agent", id: "writer-agent" },
-  input: { text: "What word did I ask you to remember?" },
-});
-assert.equal(continued.status, 202);
-if (continued.status !== 202) throw new Error("Continuation rejected");
-const second = await poll(continued.body.run.id);
-assert.equal(second.conversations![0].conversationId, conversationId);
-assert.ok(
-  typeof second.run.output === "string" &&
-    second.run.output.toLowerCase().includes("juniper"),
-);
-const events = await api.runs.listEvents({
-  params: { runId: second.run.id },
-  query: { after: 0, limit: 100 },
-});
-assert.equal(events.status, 200);
-if (events.status === 200)
-  assert.ok(
-    events.body.some(
-      (event) =>
-        event.type === "execution.terminal" && event.data?.resumed === true,
-    ),
-  );
 assert.equal(
   (
     await startRun(api, {
       conversationId,
-      target: { kind: "agent", id: "writer-agent" },
+      target: { kind: "workflow", id: "core" },
       input: { text: "Resume elsewhere" },
     })
   ).status,
-  409,
+  501,
 );
 assert.equal(
   (
-    await api.workflows.deleteWorkflow({
-      params: { workflowId: created.body.id },
+    await startRun(api, {
+      target: { kind: "agent", id: "orchestrator" },
+      input: { text: "Unsupported" },
     })
   ).status,
-  200,
+  501,
 );
 assert.equal(
   (await api.projects.deleteProject({ params: { projectId: project.body.id } }))
@@ -174,5 +179,5 @@ assert.equal(
   200,
 );
 console.log(
-  "Real native agent workflows, observation, project cwd and direct-session continuation passed",
+  "Real Core workflows, orchestrator observation, project cwd and history retention passed",
 );

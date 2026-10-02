@@ -1,6 +1,5 @@
 import { createClient, startRun } from "../../client/src/index.js";
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
 
 const base = process.env.DEMO_BASE_URL;
 const token = process.env.API_TOKEN;
@@ -212,25 +211,13 @@ for (const item of [empty, clone, existing]) {
     "project lookup",
   );
 }
-const createdWorkflow = await api.workflows.createWorkflow({
-  body: {
-    name: "Project agent",
-    engine: "node-red",
-    specification: {
-      entry: "workflow-in",
-      flows: JSON.parse(
-        await readFile(
-          new URL("../node-red/flows.json", import.meta.url),
-          "utf8",
-        ),
-      ),
-    },
-  },
+const core = await api.workflows.getWorkflow({
+  params: { workflowId: "core" },
 });
-ensure(createdWorkflow.status === 201, "native project workflow created");
+ensure(core.status === 200 && core.body.readOnly, "built-in Core resolved");
 const target = {
   kind: "workflow" as const,
-  id: createdWorkflow.body.id,
+  id: "core",
 };
 const begin = async (projectId?: string) => {
   const accepted = await startRun(api, {
@@ -315,12 +302,12 @@ ensure(
   "projectless process cwd",
 );
 const globalAgent = await startRun(api, {
-  target: { kind: "agent", id: "writer-agent" },
+  target: { kind: "workflow", id: "core" },
   input: { text: "Run pwd and include its exact output in your reply." },
 });
 ensure(
   globalAgent.status === 202 && globalAgent.body.run.projectId === null,
-  "projectless direct acceptance",
+  "projectless Core acceptance",
 );
 const globalAgentDetail = await poll(globalAgent.body.run.id);
 ensure(
@@ -328,85 +315,57 @@ ensure(
     typeof globalAgentDetail.run.output === "string" &&
     globalAgentDetail.run.output.includes("/data/agent-work") &&
     globalAgentDetail.conversations?.length === 1,
-  "projectless direct cwd and public conversation",
+  "projectless Core cwd and public conversation",
 );
-const direct = await startRun(api, {
-  target: { kind: "agent", id: "writer-agent" },
+const bootstrap = await startRun(api, {
+  target: { kind: "workflow", id: "core" },
   input: { text: "Run pwd and include its exact output in your reply." },
   projectId: empty.id,
 });
 ensure(
-  direct.status === 202 && direct.body.conversations?.length === 0,
-  "direct fresh agent",
+  bootstrap.status === 202 && bootstrap.body.conversations?.length === 0,
+  "fresh Core workflow",
 );
-const directDetail = await poll(direct.body.run.id);
+const coreDetail = await poll(bootstrap.body.run.id);
 ensure(
-  directDetail.run.status === "completed" &&
-    typeof directDetail.run.output === "string" &&
-    directDetail.run.output.includes(empty.localPath) &&
-    directDetail.conversations?.length === 1,
-  "direct agent cwd and link",
+  coreDetail.run.status === "completed" &&
+    typeof coreDetail.run.output === "string" &&
+    coreDetail.run.output.includes(empty.localPath) &&
+    coreDetail.conversations?.length === 1,
+  "Core cwd and link",
 );
 ensure(
   (
     await call("/runs", "POST", {
-      target: { kind: "agent", id: "writer-agent" },
+      target: { kind: "workflow", id: "core" },
       input: { text: "Continue elsewhere" },
-      conversationId: directDetail.conversations[0].conversationId,
+      conversationId: coreDetail.conversations[0].conversationId,
       projectId: clone.id,
     })
-  ).status === 409,
-  "cross-directory continuation rejected before acceptance",
-);
-const continuation = await startRun(api, {
-  target: { kind: "agent", id: "writer-agent" },
-  input: { text: "Run pwd again and include its exact output in your reply." },
-  conversationId: directDetail.conversations[0].conversationId,
-  projectId: empty.id,
-});
-ensure(continuation.status === 202, "direct continuation acceptance");
-const continued = await poll(continuation.body.run.id);
-ensure(
-  continued.run.status === "completed" &&
-    typeof continued.run.output === "string" &&
-    continued.run.output.includes(empty.localPath) &&
-    continued.conversations?.[0]?.conversationId ===
-      directDetail.conversations[0].conversationId,
-  `continuation preserves conversation and selected cwd: ${JSON.stringify({ status: continued.run.status, error: continued.run.error, output: continued.run.output, links: continued.conversations })}`,
+  ).status === 501,
+  "conversation continuation rejected before acceptance",
 );
 const otherProject = await startRun(api, {
-  target: { kind: "agent", id: "writer-agent" },
+  target: { kind: "workflow", id: "core" },
   input: { text: "Run pwd and include its exact output in your reply." },
   projectId: clone.id,
 });
-ensure(otherProject.status === 202, "direct run in another project");
+ensure(otherProject.status === 202, "Core run in another project");
 const otherDetail = await poll(otherProject.body.run.id);
 ensure(
   otherDetail.run.status === "completed" &&
     typeof otherDetail.run.output === "string" &&
     otherDetail.run.output.includes(clone.localPath),
-  "direct agent selects a different explicit project",
-);
-const events = await api.runs.listEvents({
-  params: { runId: continued.run.id },
-  query: { limit: 100, after: 0 },
-});
-ensure(
-  events.status === 200 &&
-    events.body.some(
-      (event) =>
-        event.type === "execution.terminal" && event.data?.resumed === true,
-    ),
-  "provider confirmed resume",
+  "Core selects a different explicit project",
 );
 ensure(
   (
     await call("/runs", "POST", {
-      target: { kind: "agent", id: "not-configured" },
+      target: { kind: "agent", id: "orchestrator" },
       input: { text: "hello" },
     })
   ).status === 501,
-  "unsupported direct target",
+  "unsupported agent target",
 );
 ensure(
   (await call(`/projects/${empty.id}`, "DELETE")).status === 200,
@@ -431,5 +390,5 @@ ensure(
   "historical run retained",
 );
 console.log(
-  `Projects CRUD, overlap, cwd, direct continuation, and retention verified: ${ids.join(", ")}`,
+  `Projects CRUD, overlap, Core cwd and retention verified: ${ids.join(", ")}`,
 );

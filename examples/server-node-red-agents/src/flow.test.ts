@@ -12,19 +12,22 @@ describe("Core native boundary", () => {
       "link in",
       "agent",
       "link out",
-      "catch",
     ]);
     expect(nodes.find((node) => node.type === "link in")?.wires).toEqual([
-      ["core-agent"],
+      ["orchestrator"],
     ]);
     expect(nodes.find((node) => node.type === "agent")).toMatchObject({
-      id: "core-agent",
+      id: "orchestrator",
+      name: "orchestrator",
       prompt: "input.text",
       promptType: "msg",
       model: "DEFAULT_MODEL",
       modelType: "env",
-      wires: [["workflow-return"], ["workflow-return"]],
+      wires: [["workflow-return"], []],
     });
+    expect(nodes.find((node) => node.type === "agent")).not.toHaveProperty(
+      "cwd",
+    );
     expect(nodes.find((node) => node.id === "workflow-return")).toMatchObject({
       type: "link out",
       mode: "return",

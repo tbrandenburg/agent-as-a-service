@@ -3,6 +3,7 @@ import { schemas } from "@agent-as-a-service/contract";
 import type { z } from "zod";
 import type { Store } from "./registry.js";
 import { snapshot, validate } from "./native.js";
+import { core } from "./core.js";
 import type { Definition, Input, Registry, Specification } from "./native.js";
 import { Projects, ProjectError } from "./projects.js";
 import { notImplementedRoutes } from "../../server-express/src/index.js";
@@ -64,83 +65,14 @@ type Result = {
 };
 export type Executor = (payload: {
   runId: string;
-  text?: string;
-  input?: z.infer<typeof schemas.runInput>;
-  target?: string;
-  path: string;
+  input: z.infer<typeof schemas.runInput>;
+  entry: string;
   cwd?: string;
   flows: Record<string, unknown>[];
-  sessionID?: string;
 }) => Promise<void>;
 
 export class WorkerCapacityError extends Error {}
 
-const directFlows = (): Record<string, unknown>[] =>
-  [
-    { id: "direct-tab", type: "tab", label: "Direct writer" },
-    {
-      id: "direct-in",
-      type: "http in",
-      url: "/agent/writer-agent",
-      method: "post",
-      wires: [["direct-entry"]],
-    },
-    {
-      id: "direct-entry",
-      type: "function",
-      name: "Accept direct run",
-      func: `if (msg.req?.headers?.authorization !== 'Bearer '+env.get('INTERNAL_TOKEN')) { msg.statusCode=401; msg.payload={error:'Unauthorized'}; return [null,msg]; } const {runId,text,sessionID}=msg.payload||{}; if (typeof runId!=='string'||!runId||typeof text!=='string'||!text.trim()) {msg.statusCode=400;msg.payload={error:'Invalid request'};return [null,msg];} const work={runId,payload:text,agentObservation:{runId}}; if (typeof sessionID==='string'&&sessionID) work.sessionID=sessionID; msg.statusCode=202;msg.payload={accepted:true};return [work,msg];`,
-      outputs: 2,
-      wires: [["writer-agent"], ["direct-response"]],
-    },
-    {
-      id: "writer-agent",
-      type: "agent",
-      name: "Writer",
-      agent: "opencode",
-      runtime: "direct",
-      invocation: "prompt",
-      model: "DEFAULT_MODEL",
-      modelType: "env",
-      prompt: "payload",
-      promptType: "msg",
-      auto: false,
-      wires: [["direct-success"], ["direct-failure"]],
-    },
-    {
-      id: "direct-success",
-      type: "function",
-      func: `if (msg.agentExecution?.status!=='completed'||typeof msg.payload!=='string'||!msg.payload.trim()) return [null,msg];msg.payload={runId:msg.runId,eventId:msg.runId+':completed',status:'completed',output:msg.payload};return [msg,null];`,
-      outputs: 2,
-      wires: [["direct-headers"], ["direct-failure"]],
-    },
-    {
-      id: "direct-failure",
-      type: "function",
-      func: `if (!msg.runId) return null;msg.payload={runId:msg.runId,eventId:msg.runId+':failed',status:'failed'};return msg;`,
-      outputs: 1,
-      wires: [["direct-headers"]],
-    },
-    {
-      id: "direct-headers",
-      type: "function",
-      func: `msg.method='POST';msg.url='http://api:3095/finalize';msg.headers={authorization:'Bearer '+env.get('INTERNAL_TOKEN'),'content-type':'application/json'};return msg;`,
-      outputs: 1,
-      wires: [["direct-request"]],
-    },
-    {
-      id: "direct-request",
-      type: "http request",
-      method: "use",
-      ret: "obj",
-      wires: [[]],
-    },
-    { id: "direct-response", type: "http response", wires: [] },
-  ].map((node, index) =>
-    node.type === "tab"
-      ? node
-      : { ...node, z: "direct-tab", x: 100 + index * 80, y: 100 },
-  );
 const missing = (name: string) => ({
   status: 404 as const,
   body: { error: { code: "not_found", message: `${name} was not found` } },
@@ -150,7 +82,7 @@ const invalid = (message: string) => ({
   body: { error: { code: "invalid_input", message } },
 });
 const errorResponse = (
-  status: 400 | 403 | 409 | 412 | 503,
+  status: 400 | 403 | 409 | 412 | 501 | 503,
   code: string,
   message: string,
 ) => ({
@@ -179,7 +111,7 @@ const reject = (error: string, status = 409): Result => ({
 export const httpExecutor =
   (url: string, token?: string): Executor =>
   async (payload) => {
-    const response = await fetch(`${url}${payload.path}`, {
+    const response = await fetch(`${url}/start`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -244,12 +176,15 @@ export class AgentsBackend {
   }
 
   private definition(id: string): Definition | undefined {
+    if (id === core.id) return core;
     return Object.hasOwn(this.registry, id) ? this.registry[id] : undefined;
   }
 
   private guard(id: string, match?: string) {
     const entry = this.definition(id);
     if (!entry) return missing("Workflow");
+    if (entry.readOnly)
+      return errorResponse(403, "workflow_read_only", "Workflow is read-only");
     if (match && match !== `"v${entry.version}"`)
       return errorResponse(
         412,
@@ -686,11 +621,6 @@ export class AgentsBackend {
         !text(observation.input.prompt ?? observation.input.args)
       )
         return reject("Invalid or duplicate execution start");
-      if (
-        job.run.target?.kind === "agent" &&
-        observation.nodeId !== job.run.target.id
-      )
-        return reject("Unexpected agent execution");
       // A start repairs a lost best-effort deployment notice.
       if (
         this.closedDeployments.has(
@@ -707,7 +637,7 @@ export class AgentsBackend {
         this.deployments.get(observation.nodeId) ?? new Set<string>();
       generations.add(observation.deploymentId);
       this.deployments.set(observation.nodeId, generations);
-      const id = job.run.conversationId ?? randomUUID();
+      const id = randomUUID();
       const conversation: Conversation = {
         id,
         target: { kind: "agent", id: observation.nodeId },
@@ -775,8 +705,6 @@ export class AgentsBackend {
     )
       return reject("Invalid successful output");
     execution.terminal = observation.status;
-    if (job.run.conversationId && observation.resumed !== true)
-      job.failed = true;
     if (observation.status === "completed" && text(observation.sessionID))
       this.sessions.set(execution.conversationId, observation.sessionID);
     if (observation.status === "completed" && text(observation.sessionID)) {
@@ -839,21 +767,13 @@ export class AgentsBackend {
       return reject("Run is not active");
     if (
       value.status === "completed" &&
-      ((job.failed && !job.run.conversationId) ||
-        (job.run.target?.kind === "agent" && job.executions.size === 0) ||
+      (job.failed ||
         [...job.executions.values()].some(
           (execution) => execution.terminal !== "completed",
         ))
     )
       return reject("Unacknowledged execution");
-    if (value.status === "completed" && job.failed)
-      this.update(job.run, "failed", {
-        error: {
-          code: "resume_unconfirmed",
-          message: "Provider did not confirm continuation",
-        },
-      });
-    else if (value.status === "completed")
+    if (value.status === "completed")
       this.update(job.run, "completed", {
         output: schemas.runOutput.parse(value.output),
       });
@@ -905,23 +825,19 @@ export class AgentsBackend {
   private async send(
     job: Job,
     input: z.infer<typeof schemas.runInput>,
-    path: string,
+    entry: string,
     cwd?: string,
     flows: Specification["flows"] = [],
-    sessionID?: string,
   ) {
     if (!this.writable(job, "running")) return;
     job.dispatched = true;
     try {
       await this.dispatch({
         runId: job.run.id,
-        ...(job.run.target?.kind === "agent"
-          ? { text: (input as { text: string }).text }
-          : { input, target: path }),
-        path,
+        input,
+        entry,
         cwd,
         flows,
-        sessionID,
       });
       // A start can arrive before the dispatch response.
     } catch (error) {
@@ -1035,7 +951,12 @@ export class AgentsBackend {
         ...notImplementedRoutes.workflows,
         listWorkflows: async ({ query }) => {
           const page = this.page(
-            Object.values(this.registry),
+            [
+              core,
+              ...Object.values(this.registry).filter(
+                (item) => item.id !== core.id,
+              ),
+            ],
             query.cursor,
             query.limit,
           );
@@ -1104,13 +1025,20 @@ export class AgentsBackend {
               !schemas.runInput.safeParse(body.input).success
             )
               return invalid("A target and valid input are required");
-            if (
-              body.target.kind === "agent" &&
-              (!record(body.input) ||
-                !text(body.input.text) ||
-                Object.keys(body.input).some((field) => field !== "text"))
-            )
-              return invalid("Only text input is supported for direct agents");
+            if (body.target.kind !== "workflow")
+              return errorResponse(
+                501,
+                "unsupported_target_kind",
+                "Only workflow targets are supported",
+              );
+            if (body.conversationId)
+              return errorResponse(
+                501,
+                "conversation_continuation_unsupported",
+                "startRun does not continue conversations",
+              );
+            const definition = this.definition(body.target.id);
+            if (!definition) return missing("Workflow");
             if (
               [...this.jobs.values()].filter(({ run }) =>
                 ["queued", "running", "paused"].includes(run.status),
@@ -1121,41 +1049,6 @@ export class AgentsBackend {
                 "workers_busy",
                 "Maximum concurrent execution workers reached",
               );
-            if (
-              !["agent", "workflow"].includes(body.target.kind) ||
-              (body.target.kind === "agent" &&
-                body.target.id !== "writer-agent")
-            )
-              return {
-                status: 501 as const,
-                body: {
-                  error: {
-                    code: "not_implemented",
-                    message:
-                      body.target.kind === "agent"
-                        ? "Agent target is not configured"
-                        : "Target kind is not supported",
-                  },
-                },
-              };
-            const definition =
-              body.target.kind === "workflow"
-                ? this.definition(body.target.id)
-                : undefined;
-            if (body.target.kind === "workflow" && !definition)
-              return missing("Workflow");
-            const prior =
-              body.conversationId &&
-              this.conversations.get(body.conversationId);
-            if (
-              body.conversationId &&
-              (!prior ||
-                body.target.kind !== "agent" ||
-                prior.target?.kind !== "agent" ||
-                prior.target.id !== body.target.id ||
-                !this.sessions.has(body.conversationId))
-            )
-              return missing("Conversation");
             let cwd: string | undefined;
             if (this.projects) {
               try {
@@ -1164,30 +1057,14 @@ export class AgentsBackend {
                 return this.projectError(error);
               }
             } else if (body.projectId) return missing("Project");
-            if (
-              body.conversationId &&
-              cwd &&
-              this.sessionDirectories.get(body.conversationId) !== cwd
-            )
-              return errorResponse(
-                409,
-                "conversation_directory_conflict",
-                "OpenCode continuation requires the original working directory",
-              );
-            const accepted =
-              body.target.kind === "agent"
-                ? { entry: "/agent/writer-agent", flows: directFlows() }
-                : snapshot(definition!);
+            const accepted = snapshot(definition);
             const now = new Date().toISOString();
             const run: Run = {
               id: randomUUID(),
               projectId: body.projectId ?? null,
               target: body.target,
               input: body.input,
-              ...(definition ? { workflowVersion: definition.version } : {}),
-              ...(body.conversationId
-                ? { conversationId: body.conversationId }
-                : {}),
+              workflowVersion: definition.version,
               status: "queued",
               createdAt: now,
               updatedAt: now,
@@ -1195,14 +1072,7 @@ export class AgentsBackend {
             const detail: Detail = {
               run,
               executions: [],
-              conversations: body.conversationId
-                ? [
-                    {
-                      conversationId: body.conversationId,
-                      nodeId: "writer-agent",
-                    },
-                  ]
-                : [],
+              conversations: [],
             };
             this.runs.set(run.id, detail);
             this.events.set(run.id, []);
@@ -1229,19 +1099,14 @@ export class AgentsBackend {
                 expires: Date.now() + 86_400_000,
               });
             this.update(run, "running");
-            const path = accepted.entry;
-            const sessionID = body.conversationId
-              ? this.sessions.get(body.conversationId)
-              : undefined;
             setImmediate(
               () =>
                 void this.send(
                   job,
                   body.input!,
-                  path,
+                  accepted.entry,
                   cwd,
                   accepted.flows,
-                  sessionID,
                 ),
             );
             return { status: 202, body: response };
