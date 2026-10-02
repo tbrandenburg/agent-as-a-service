@@ -1,5 +1,6 @@
 import { createClient, startRun } from "../../client/src/index.js";
 import { execFileSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 
 const base = process.env.DEMO_BASE_URL;
 const token = process.env.API_TOKEN;
@@ -211,7 +212,26 @@ for (const item of [empty, clone, existing]) {
     "project lookup",
   );
 }
-const target = { kind: "workflow" as const, workflowId: "node-red-demo" };
+const createdWorkflow = await api.workflows.createWorkflow({
+  body: {
+    name: "Project agent",
+    engine: "node-red",
+    specification: {
+      entry: "workflow-in",
+      flows: JSON.parse(
+        await readFile(
+          new URL("../node-red/flows.json", import.meta.url),
+          "utf8",
+        ),
+      ),
+    },
+  },
+});
+ensure(createdWorkflow.status === 201, "native project workflow created");
+const target = {
+  kind: "workflow" as const,
+  workflowId: createdWorkflow.body.id,
+};
 const begin = async (projectId?: string) => {
   const accepted = await startRun(api, {
     target,

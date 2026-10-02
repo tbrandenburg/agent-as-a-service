@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { id, timestamp } from "./common.js";
+import { jsonValue } from "./json.js";
+export { jsonValue, jsonValueSchema, isJsonValue } from "./json.js";
+export type { JsonValue } from "./json.js";
 
 export const project = z.object({
   id,
@@ -76,16 +79,12 @@ export const runStatus = z.enum([
   "rejected",
   "cancelled",
 ]);
-export const runInput = z.union([
-  z.string().min(1),
-  z.record(z.unknown()),
-  z.array(contentPart).min(1),
-]);
+export const runInput = jsonValue;
 export const runTarget = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent"), agentId: id }),
   z.object({ kind: z.literal("workflow"), workflowId: id }),
 ]);
-export const runOutput = z.union([z.string(), z.array(contentPart)]);
+export const runOutput = jsonValue;
 export const run = z.object({
   id,
   projectId: id.nullish(),

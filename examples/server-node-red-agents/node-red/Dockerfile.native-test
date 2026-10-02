@@ -5,6 +5,8 @@ COPY examples/server-node-red-agents/node-red/package.json examples/server-node-
 RUN npm ci --omit=dev
 COPY packages/contract/src/v1/schemas/ /contract-schemas/
 COPY examples/server-node-red-agents/node-red/ /data/
+COPY examples/server-node-red-agents/src/native-fixtures.ts /tmp/native-fixtures.ts
+RUN /data/node_modules/.bin/esbuild /tmp/native-fixtures.ts --bundle --platform=node --format=cjs --outfile=/data/native-fixtures.cjs
 RUN node /data/extract-link-caller.cjs /data
 ENV NODE_PATH=/usr/src/node-red/node_modules CONTRACT_SCHEMA_SOURCE=/contract-schemas/domain.ts DEFAULT_MODEL=github-copilot/gpt-6-luna
 ENTRYPOINT ["node", "--test", "--test-reporter=tap"]

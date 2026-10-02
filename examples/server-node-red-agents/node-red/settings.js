@@ -1,8 +1,5 @@
 const token = process.env.INTERNAL_TOKEN;
 if (!token) throw new Error("INTERNAL_TOKEN is required");
-const adminToken = process.env.NODE_RED_ADMIN_TOKEN;
-if (!adminToken || adminToken === token || adminToken === process.env.API_TOKEN)
-  throw new Error("A distinct NODE_RED_ADMIN_TOKEN is required");
 
 module.exports = {
   flowFile: "flows.json",
@@ -13,18 +10,6 @@ module.exports = {
       level: "info",
       metrics: process.env.WORKER_RUNTIME === "true" && process.env.NODE_RED_WORKER_METRICS === "true",
       audit: false,
-    },
-  },
-  adminAuth: {
-    type: "credentials",
-    users: [],
-    tokens: async (provided) => {
-      const { timingSafeEqual } = require("node:crypto");
-      const actual = Buffer.from(provided);
-      const expected = Buffer.from(adminToken);
-      return actual.length === expected.length && timingSafeEqual(actual, expected)
-        ? { username: "aaas-internal", permissions: ["flows.read", "flows.write"] }
-        : null;
     },
   },
   nodeRedAgentsLifecycleObserver: async (record) => {

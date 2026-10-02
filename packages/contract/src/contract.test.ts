@@ -159,7 +159,7 @@ describe("REST specification", () => {
       ).toBe(true);
     expect(runStart.safeParse({ input: "hello" }).success).toBe(true);
     expect(runStart.safeParse({}).success).toBe(true);
-    expect(runStart.safeParse({ input: "" }).success).toBe(false);
+    expect(runStart.safeParse({ input: "" }).success).toBe(true);
     expect(
       runStart.safeParse({ conversationId: identifier, input: "Continue" })
         .success,

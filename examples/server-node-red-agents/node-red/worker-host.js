@@ -34,6 +34,8 @@ const authenticate = (request, response, next) => {
   next();
 };
 app.post("/activate", authenticate, (_request, response) => { observer.activate(); response.json({ active: true }); });
+// The host listens only after flows:started; readiness never changes user flow JSON.
+app.get("/ready", (_request, response) => response.json({ ready: true }));
 app.post("/invoke", authenticate, express.json({ limit: "1mb" }), (request, response) => {
   const body = request.body;
   if (!body || body.runId !== runId || typeof body.target !== "string" || !body.target || !runInput.safeParse(body.input).success || Object.keys(body).some((key) => !["runId", "input", "target"].includes(key))) return response.status(400).json({ error: "Invalid invocation" });

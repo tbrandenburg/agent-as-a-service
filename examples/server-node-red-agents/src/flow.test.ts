@@ -1,10 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { Node } from "./managed.js";
 
 const nodes = JSON.parse(
   readFileSync(new URL("../node-red/flows.json", import.meta.url), "utf8"),
-) as Node[];
+) as Record<string, unknown>[];
 
 describe("Core native boundary", () => {
   it("calls one agent with input.text and returns its reply using native Link nodes", () => {

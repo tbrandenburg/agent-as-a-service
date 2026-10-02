@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { schemas } from "@agent-as-a-service/contract";
 import type { ApiImplementation } from "../routes.js";
 import { notImplementedRoutes } from "./not-implemented.js";
 import { DemoStore } from "./demo-store.js";
@@ -86,7 +87,7 @@ export function createDemoImplementation(
           body,
           () => {
             const run = store.createRun(
-              body.content,
+              schemas.runInput.parse(body.content),
               conversation.projectId ?? undefined,
               conversation.id,
             );

@@ -22,7 +22,7 @@ ready() {
   local base="$1" attempt
   for ((attempt = 1; attempt <= 90; attempt++)); do
     if curl --max-time 2 --fail --silent "$base/api/v1/health" >/dev/null &&
-      compose exec -T node-red node -e "Promise.all([fetch('http://127.0.0.1:1880/flow/agents-tab',{headers:{authorization:'Bearer '+process.env.NODE_RED_ADMIN_TOKEN}}),fetch('http://api:3095/observations',{method:'POST'})]).then(([flow,callback]) => process.exit(flow.ok && callback.status === 401 ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then
+      compose exec -T node-red node -e "Promise.all([fetch('http://127.0.0.1:1881/ready',{headers:{authorization:'Bearer '+process.env.INTERNAL_TOKEN}}),fetch('http://api:3095/observations',{method:'POST'})]).then(([host,callback]) => process.exit(host.ok && callback.status === 401 ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -33,8 +33,8 @@ ready() {
 }
 
 credentials() {
-  if [[ "$API_TOKEN" == "$INTERNAL_TOKEN" || "$API_TOKEN" == "$NODE_RED_ADMIN_TOKEN" || "$INTERNAL_TOKEN" == "$NODE_RED_ADMIN_TOKEN" ]]; then
-    printf 'API_TOKEN, INTERNAL_TOKEN and NODE_RED_ADMIN_TOKEN must differ\n' >&2
+  if [[ "$API_TOKEN" == "$INTERNAL_TOKEN" ]]; then
+    printf 'API_TOKEN and INTERNAL_TOKEN must differ\n' >&2
     exit 1
   fi
 }
@@ -55,7 +55,7 @@ check_demo_space() {
 
 if [[ "$action" == demo ]]; then
   project="aas-node-red-agents-demo-$(< /proc/sys/kernel/random/uuid)"
-  export API_TOKEN="${API_TOKEN:-dev-token}" INTERNAL_TOKEN="${INTERNAL_TOKEN:-internal-observer-demo-token}" NODE_RED_ADMIN_TOKEN="${NODE_RED_ADMIN_TOKEN:-internal-admin-demo-token}"
+  export API_TOKEN="${API_TOKEN:-dev-token}" INTERNAL_TOKEN="${INTERNAL_TOKEN:-internal-observer-demo-token}"
   credentials
   check_demo_space
   mkdir -p "$root/.home"
@@ -79,6 +79,7 @@ if [[ "$action" == demo ]]; then
   trap cleanup_demo EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  ss -H -ltn >/dev/null
   compose up --build -d || { compose logs >&2; exit 1; }
   base="$(url)" || { compose logs >&2; exit 1; }
   ready "$base"
@@ -126,7 +127,6 @@ case "$action" in
   start)
     : "${API_TOKEN:?Set API_TOKEN for this named instance}"
     : "${INTERNAL_TOKEN:?Set INTERNAL_TOKEN for this named instance}"
-    : "${NODE_RED_ADMIN_TOKEN:?Set NODE_RED_ADMIN_TOKEN for this named instance}"
     credentials
     mkdir -p "$root/.home"
     if [[ -n "$(compose ps --all --quiet)" ]]; then
@@ -134,6 +134,7 @@ case "$action" in
       bash "$0" status
       exit 1
     fi
+    ss -H -ltn >/dev/null
     compose up --build -d || { compose logs >&2; exit 1; }
     base="$(url)" || { compose logs >&2; exit 1; }
     ready "$base"

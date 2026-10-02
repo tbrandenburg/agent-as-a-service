@@ -10,7 +10,7 @@ This repository defines an engine-neutral REST contract for projects, conversati
 | `packages/agent-runtime/` | Optional server-side agent provider interfaces. |
 | `examples/server-express/` | Express server using the official ts-rest adapter; the default backend validates requests and returns 501 for unimplemented resource operations. `src/adapters/demo.ts` provides the in-memory demo backend. |
 | `examples/server-opencode/` | Dockerized in-memory Express contract backend that runs the fixed `opencode/big-pickle` CLI for conversation messages. |
-| `examples/server-node-red-agents/` | Node-RED-backed contract example: private worker per run, managed workflow tabs, project working directories, and agent conversations. |
+| `examples/server-node-red-agents/` | Node-RED-backed contract example: native complete-flow definitions, private worker per run, project working directories, and agent conversations. |
 | `examples/client/` | Typed API client, usage example, and end-to-end demo. |
 | `scripts/` | Generate OpenAPI and the catalog/parity documents; validate the API and Archon route accounting. |
 | `docs/` | API catalog, design decisions, research, event semantics, and parity documentation. |
@@ -60,6 +60,8 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-10-01: Pitfall: CLI static-wire preflight rejected valid native multitab/subflow calls. Prevention rule/countermeasure: Verify extracted adapters against cross-tab/subflow runtime fixtures; retain native execution semantics and let bounded runtime execution determine graph success.
+- 2026-10-01: Pitfall: Plain JSON objects created by Node-RED Function nodes have VM-realm prototypes. Prevention rule/countermeasure: Test runtime JSON validators against real Function-created objects; do not require host-realm Object.prototype identity.
 - 2026-10-01: Pitfall: Native Link Out(return) snapshots omit empty wires, breaking exact deployment verification. Prevention rule/countermeasure: Normalize native Admin API representations on both sides and verify managed CRUD against a real runtime before accepting fixture-only checks.
 - 2026-10-01: Pitfall: Replacing a native-link fixture through per-tab deployment left stale runtime wiring. Prevention rule/countermeasure: Use full native deployment for test-only graph replacement and restore the complete snapshot before provider acceptance.
 - 2026-09-30: Pitfall: A filesystem proof chain replaced the agent task prompt with its bare topic, provoking tool searches and empty-output failures. Prevention rule/countermeasure: Preserve and restore task payloads across probes; regression-test the exact prompt reaching the agent.

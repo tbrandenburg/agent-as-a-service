@@ -22,8 +22,8 @@ help:
 	  'demo-opencode     Build Docker and run the real published-port walkthrough' \
 	  'demo-node-red     Build Docker and run the real Node-RED walkthrough' \
 	  'demo-node-red-agents  Run a disposable lifecycle-observed Node-RED walkthrough' \
-	  'spawn-node-red-agents    Start a persistent instance with a generated name (three distinct tokens required)' \
-	  'start-node-red-agents    Start named instance (INSTANCE and three distinct tokens required)' \
+	  'spawn-node-red-agents    Start a persistent instance with a generated name (two distinct tokens required)' \
+	  'start-node-red-agents    Start named instance (INSTANCE and two distinct tokens required)' \
 	  'status-node-red-agents   Show named instance URL and containers (INSTANCE required)' \
 	  'logs-node-red-agents     Show named instance logs (INSTANCE required)' \
 	  'stop-node-red-agents     Stop named instance, retain volumes (INSTANCE required)' \

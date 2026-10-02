@@ -4,7 +4,7 @@ const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { execFileSync } = require("node:child_process");
 
-// Extract the unchanged upstream adapter without installing its unused CLI runtime.
+// Extract native Link Call without the CLI's single-tab/static-wires preflight.
 const integrity = "ZPtIyjuKo6bzeax9IHXKhWGsXV7z+6OcWnoNWs9TJTFm0Dq5vTHAJpiuxDtFUrG4aZoaMxmMD8z/bbCL3cid5A==";
 async function extract() {
   const destination = process.argv[2];
@@ -20,10 +20,20 @@ async function extract() {
     await writeFile(path, archive);
     await mkdir(destination, { recursive: true });
     for (const [source, name] of [["package/src/link-call.js", "link-call.cjs"], ["package/LICENSE", "link-call.LICENSE"]]) {
-      const content = execFileSync("tar", ["-xOf", path, source], { timeout: 10_000 });
+      const original = execFileSync("tar", ["-xOf", path, source], { timeout: 10_000 });
+      const preflight = "const validation = validateTarget(RED, target, { flow });";
+      const exports = "module.exports = { createHostLinkCaller, resolveFlow, validateTarget };";
+      if (name === "link-call.cjs" && (!original.toString().includes(preflight) || !original.toString().includes(exports) || !original.toString().includes("function createHostLinkCaller(RED)"))) throw new Error("Upstream preflight patch no longer applies");
+      // Trusted complete flows can cross Links/subflows. Runtime lookup and timeout
+      // are authoritative; preserve the upstream call/return implementation.
+      const content = name === "link-call.cjs"
+        ? `"use strict";\nconst crypto = require("node:crypto");\n${original.toString().slice(original.toString().indexOf("function createHostLinkCaller(RED)"))}`
+          .replace(preflight, "const validation = { ok: true, targetId: target, warnings: [] };")
+          .replace(exports, "module.exports = { createHostLinkCaller };")
+        : original;
       await writeFile(join(resolve(destination), name), content);
     }
-    console.log("Extracted unchanged node-red-cli@0.2.18 adapter; SHA-512 verified");
+    console.log("Extracted node-red-cli@0.2.18 native adapter; SHA-512 verified; static CLI preflight bypassed");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
