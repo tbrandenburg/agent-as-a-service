@@ -11,6 +11,7 @@ const waiting = new Set();
 const max = Number(process.env.MAX_WORKERS ?? "4");
 if (!Number.isSafeInteger(max) || max < 1 || max > 32) throw new Error("Invalid MAX_WORKERS");
 const capacityWaitMs = 20_000;
+const internalRequestLimit = 3 * 1024 * 1024;
 const released = new Set();
 function notifyRelease() { for (const wake of released) wake(); released.clear(); }
 async function waitForSlot(id) {
@@ -165,9 +166,14 @@ const server = http.createServer(async (request, response) => {
 if (require.main === module) server.listen(1881, "0.0.0.0");
 async function read(request) {
   const parts = [];
-  for await (const part of request) { parts.push(part); if (Buffer.concat(parts).length > 1_000_000) throw new Error("Too large"); }
-  return JSON.parse(Buffer.concat(parts).toString("utf8"));
+  let size = 0;
+  for await (const part of request) {
+    size += part.length;
+    if (size > internalRequestLimit) throw new Error("Too large");
+    parts.push(part);
+  }
+  return JSON.parse(Buffer.concat(parts, size).toString("utf8"));
 }
 if (require.main === module) process.on("SIGTERM", () => { for (const id of workers.keys()) void stop(id); });
 async function writeSnapshot(dir, flows) { await writeFile(join(dir, "flows.json"), JSON.stringify(flows)); }
-module.exports = { stop, start, workers, server, forwardWorkerOutput, writeSnapshot };
+module.exports = { stop, start, workers, server, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit };
