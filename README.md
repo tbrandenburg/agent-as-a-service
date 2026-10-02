@@ -52,6 +52,8 @@ make demo-express
 
 `DEFAULT_MODEL=github-copilot/gpt-6-luna make demo-node-red-agents` verifies native Node-RED workflows and real OpenCode sessions in a disposable Compose project with a dynamic loopback API port. Definitions store `{entry, flows}` using complete native editor exports; CRUD has no shared deployment, and runs use immutable versioned snapshots. Run input/output accept arbitrary JSON values, including numbers, booleans, null and arrays. Operators can seed provider authentication from gitignored `.home/`. Each workflow/direct-agent run has a separate bounded worker whose cwd is chosen only by explicit `run.projectId` (or the global default); same-project runs may overlap. Persistent instances use `make spawn-node-red-agents` or `make start-node-red-agents INSTANCE=alpha` with distinct `API_TOKEN` and `INTERNAL_TOKEN`. See [/examples/server-node-red-agents/README.md](/examples/server-node-red-agents/README.md) for native workflow examples, acceptance, projects and persistence.
 
+`make smoke-node-red-agents` runs one provider-free multiplication roundtrip against a fresh Docker instance using the typed HTTP contract client. It verifies `13.75 × -8 = -110`, prints phase timings and a machine-readable `SMOKE_RESULT` JSON record, and removes its own containers, volumes and image tags. See [smoke timing definitions](/examples/server-node-red-agents/README.md#timed-contract-smoke).
+
 To start the default example server instead:
 
 ```sh
@@ -77,6 +79,7 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make demo-opencode` | Build Docker and run the real published-port OpenCode walkthrough. |
 | `make demo-node-red` | Build Docker and run the private Node-RED workflow walkthrough. |
 | `make demo-node-red-agents` | Build Docker and run the real lifecycle-observed agent walkthrough. |
+| `make smoke-node-red-agents` | Run one provider-free multiplication roundtrip, report timings and clean up. |
 | `make spawn-node-red-agents` | Start a persistent API/Node-RED pair with a generated name (requires three distinct tokens). |
 | `make start-node-red-agents INSTANCE=name` | Start a named API/Node-RED pair (requires three distinct tokens). |
 | `make status-node-red-agents INSTANCE=name` / `make logs-node-red-agents INSTANCE=name` | Locate its URL and inspect its containers/logs. |

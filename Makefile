@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check check-contract check-generated security lint format-check typecheck test test-contract test-native-node-red-agents validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
+.PHONY: help install generate openapi catalog parity-doc check check-contract check-generated security lint format-check typecheck test test-contract test-native-node-red-agents validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents smoke-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
 
 help:
 	@printf '%s\n' \
@@ -22,6 +22,7 @@ help:
 	  'demo-opencode     Build Docker and run the real published-port walkthrough' \
 	  'demo-node-red     Build Docker and run the real Node-RED walkthrough' \
 	  'demo-node-red-agents  Run a disposable lifecycle-observed Node-RED walkthrough' \
+	  'smoke-node-red-agents  Run one provider-free multiplication roundtrip with timings' \
 	  'spawn-node-red-agents    Start a persistent instance with a generated name (two distinct tokens required)' \
 	  'start-node-red-agents    Start named instance (INSTANCE and two distinct tokens required)' \
 	  'status-node-red-agents   Show named instance URL and containers (INSTANCE required)' \
@@ -137,6 +138,9 @@ demo-node-red:
 
 demo-node-red-agents:
 	@bash examples/server-node-red-agents/instance.sh demo
+
+smoke-node-red-agents:
+	@node --import tsx examples/server-node-red-agents/src/smoke.ts
 
 spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents:
 	@bash examples/server-node-red-agents/instance.sh $(patsubst %-node-red-agents,%,$@)

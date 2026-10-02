@@ -69,6 +69,31 @@ Runtime load errors, missing/disabled entries, unreachable returns, node errors 
 
 ## Acceptance
 
+### Timed contract smoke
+
+```sh
+make smoke-node-red-agents
+```
+
+Requires installed workspace dependencies, Docker Compose, curl, Make and `ss`, plus at least 4 GiB free in Docker storage. Builds may require registry/npm access; workflow execution needs no model access or provider credentials. The command generates distinct temporary tokens and a fresh instance name, uses the existing instance startup/readiness checks, and calls the typed HTTP contract client to validate, create and retrieve a native `Link In → Function → Link Out(return)` workflow. It executes once with `{a:13.75,b:-8}`, requires immediate run readability and completed numeric output `-110`, then removes its own containers, volumes and project image tags. Other instances are untouched.
+
+Rejection, failed/cancelled runs, timeout, incorrect output or cleanup failure returns a nonzero exit status. Each HTTP request is bounded to 30 seconds; polling is bounded to 60 seconds, and lifecycle commands to 300 seconds. Failure and interruption attempt cleanup; instance logs are printed on failure.
+
+The final `SMOKE_RESULT` line contains UTC start/finish timestamps, workflow/run IDs, input/output, status and monotonic durations in milliseconds:
+
+| Field | Boundary |
+| --- | --- |
+| `preparationMs` | Docker storage and project collision checks. |
+| `spawnMs` | Existing instance start command, including Docker build/cache checks and API/private supervisor readiness. Not a cold-build benchmark. |
+| `workflowValidationMs`, `workflowCreationMs`, `workflowRetrievalMs` | Corresponding HTTP request through complete response receipt. |
+| `runAcceptanceMs` | POST run through receipt of `202`. |
+| `executionMs` | POST run through retrieval and verification of completed output; includes acceptance, worker startup and 50 ms polling. |
+| `stepsCompleteMs` | Command start through verified result, excluding cleanup; omitted on failure. |
+| `cleanupMs` | Removing owned containers, volumes, network and image tags. |
+| `overallMs` | Command start through cleanup attempt. |
+
+`runAcceptanceMs` is included in `executionMs`; these fields must not be summed. `spawnIncludesBuild` is always true. Timings measure client-observed execution rather than multiplication CPU time.
+
 ```sh
 make test-native-node-red-agents
 bash examples/server-node-red-agents/native-acceptance.sh
