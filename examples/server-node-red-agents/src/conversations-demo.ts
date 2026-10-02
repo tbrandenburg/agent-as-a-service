@@ -332,12 +332,13 @@ assert.ok(
   "Whole originating workflow busy guard must be exercised",
 );
 await poll(original.run.id);
-// Node hooks drain independently of public completion. Wait for the known native deliveries.
+// Link Out(return) may not emit onComplete; wait for cleanup before freezing history.
 const drainDeadline = Date.now() + 20_000;
 while (Date.now() < drainDeadline) {
   const detail = await get(original.run.id);
   if (
-    ["custom-agent", "delay", "return"].every((key) =>
+    workerDirectories() === "[]" &&
+    ["custom-agent", "delay"].every((key) =>
       detail.executions?.some(
         (execution) =>
           execution.key === key && execution.status === "completed",
@@ -349,12 +350,23 @@ while (Date.now() < drainDeadline) {
 }
 const historical = await get(original.run.id);
 assert.ok(
-  ["custom-agent", "delay", "return"].every((key) =>
+  ["custom-agent", "delay"].every((key) =>
     historical.executions?.some(
       (execution) => execution.key === key && execution.status === "completed",
     ),
   ),
   "Expected native observations must drain",
+);
+assert.equal(
+  workerDirectories(),
+  "[]",
+  "Originating worker must be cleaned up",
+);
+assert.ok(
+  historical.executions?.some(
+    (execution) => execution.key === "return" && execution.status !== "running",
+  ),
+  "Return delivery must be observed and closed without inventing completion",
 );
 const historicalEvents = await call(
   `/runs/${original.run.id}/events?after=0&limit=100`,

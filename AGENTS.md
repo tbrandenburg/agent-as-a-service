@@ -60,6 +60,8 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-10-02: Pitfall: A reused test image retained stale extracted adapters and bundled schemas. Prevention rule/countermeasure: Rebuild or regenerate every derived runtime artifact before using source-mounted images for acceptance.
+- 2026-10-02: Pitfall: Native Link Out(return) did not emit generic onComplete, invalidating an E2E oracle. Prevention rule/countermeasure: Verify observed delivery and drained closure; never require completion evidence a native node does not emit.
 - 2026-10-02: Pitfall: Public run completion preceded asynchronous node observation drain, making immediate event assertions flaky. Prevention rule/countermeasure: Wait within a bounded deadline for expected observations; do not infer observation delivery from terminal run status.
 - 2026-10-02: Pitfall: Launch cleanup awaiting public stop can deadlock because stop waits for launch settlement. Prevention rule/countermeasure: Use direct worker cleanup inside launch failures; reserve public stop for external lifecycle control.
 - 2026-10-01: Pitfall: CLI static-wire preflight rejected valid native multitab/subflow calls. Prevention rule/countermeasure: Verify extracted adapters against cross-tab/subflow runtime fixtures; retain native execution semantics and let bounded runtime execution determine graph success.
