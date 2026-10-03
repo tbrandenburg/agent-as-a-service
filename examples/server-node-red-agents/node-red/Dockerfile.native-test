@@ -10,4 +10,4 @@ RUN /data/node_modules/.bin/esbuild /tmp/native-fixtures.ts --bundle --platform=
 RUN node /data/extract-link-caller.cjs /data
 ENV NODE_PATH=/usr/src/node-red/node_modules CONTRACT_SCHEMA_SOURCE=/contract-schemas/domain.ts DEFAULT_MODEL=github-copilot/gpt-6-luna
 ENTRYPOINT ["node", "--test", "--test-reporter=tap"]
-CMD ["native.test.cjs", "observer.test.cjs", "supervisor.test.cjs"]
+CMD ["native.test.cjs", "observer.test.cjs", "supervisor.test.cjs", "interaction-host.test.cjs"]

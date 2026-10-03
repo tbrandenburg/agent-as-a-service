@@ -11,7 +11,7 @@ make install
 DEFAULT_MODEL=github-copilot/gpt-6-luna API_TOKEN=dev-token make demo-node-red-agents
 ```
 
-The disposable demo checks Docker storage (at least 4 GiB free), builds a unique Compose project, discovers its dynamic loopback API port, runs native HTTP acceptance and real-provider/session acceptance, then removes its own containers, volumes and project images. Only the public API is published; the supervisor and authenticated callback listener stay on the Compose network. Node-RED 5.0.7 installs `@tbrandenburg/node-red-agents@0.4.3` and OpenCode CLI 1.18.33. The native host Link Call implementation is extracted from the integrity-verified `@tbrandenburg/node-red-cli@0.2.18` tarball at build time, avoiding its unused dependency tree. Extraction removes the CLI's single-tab/static-wire preflight, which cannot follow native cross-tab Links/subflows; invocation, first-return handling and cleanup retain upstream semantics. Runtime lookup and bounded timeout own invalid-target failures.
+The disposable demo checks Docker storage (at least 4 GiB free), builds a unique Compose project, discovers its dynamic loopback API port, runs native HTTP acceptance and real-provider/session acceptance, then removes its own containers, volumes and project images. Only the public API is published; the supervisor and authenticated callback listener stay on the Compose network. Node-RED 5.0.7 installs `@tbrandenburg/node-red-agents@0.4.4` and OpenCode CLI 1.18.33. The native host Link Call implementation is extracted from the integrity-verified `@tbrandenburg/node-red-cli@0.2.18` tarball at build time, avoiding its unused dependency tree. Extraction removes the CLI's single-tab/static-wire preflight and adds private Interaction continuation using a fresh host return context; no user flow nodes are added or rewritten. Runtime lookup and bounded timeout own invalid-target failures.
 
 The optional gitignored root `.home/` seed is mounted read-only and copied into the Node-RED container user's home on startup, including hidden files. For authenticated providers, place trusted home-relative configuration there, such as `.home/.config/opencode/opencode.jsonc` and `.home/.local/share/opencode/auth.json`. The API never mounts this seed; container changes never sync back. Never display credential contents. `opencode auth list` inside your instance lists provider names without credentials. OpenCode storage is initialized during image build.
 
@@ -68,6 +68,31 @@ Start with:
 Runtime load errors, missing/disabled entries, unreachable returns, node errors and timeouts become failed runs asynchronously. Readiness is a host route available after `flows:started`, outside user flow JSON. No agent conversation is needed for a native non-agent workflow.
 
 ## Acceptance
+
+### Human Interaction acceptance (no model calls)
+
+```sh
+bash examples/server-node-red-agents/interaction-e2e.sh
+```
+
+Builds a project-unique Docker Compose instance with an ephemeral localhost API port and `MAX_WORKERS=1`. Runs a real native `Link In → Change → Interaction → Change → Link Out(return)` through public HTTP. It verifies ordered decision discovery, project filtering, worker-free waits, capacity reuse, same-Run continuation, original-message preservation, accepted-snapshot protection after a workflow edit, `before=1/after=1`, comment-to-text mapping, invalid/duplicate/idempotency rejection and paused cancellation. The runner prints sanitized curl commands and response bodies, verifies three distinct private attempts for two public Runs and their shutdown, then removes its own containers, volumes and project image tags. It inspects listeners/storage before service startup. Requires Docker Compose, installed workspace dependencies, curl, openssl and `ss`; workflow execution requires no provider credentials.
+
+Evidence is written to the printed `/tmp/opencode/aas-interaction-...` directory: `http.log`, `lifecycle.log`, `attempts.log`, build/container logs and cleanup confirmation. `EVIDENCE_DIR` can select another existing-parent output location. Tokens are generated per invocation and never printed.
+
+## Human Interactions
+
+The existing `GET /api/v1/interactions` returns pending Interactions from paused Runs with pagination and optional `projectId`. Prompt and ordered decision IDs come from the node's v1 plan; labels remain Node-RED configuration. Submit a declared choice through:
+
+```sh
+curl -sS -X POST "$BASE_URL/api/v1/interactions/$INTERACTION_ID/decisions" \
+  -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: human-decision-1' \
+  --data '{"decision":"revise","comment":"add one more test"}'
+```
+
+The response is `200 {run}` for the same public Run. `comment` maps to node `text`; the node produces `msg.interaction={id,decision,text?}` and normal Node-RED wires route downstream. Each Run retains its accepted `entry/flows`, plan and original JSON message across a worker-free human wait. A fresh private worker validates the checkpoint and choice using the installed Interaction node before admission consumes the decision. Workflow edits/deletion cannot alter this snapshot. No entry replay, graph reconstruction, visible resume plumbing or public attempt resource is used. Private attempts own supervisor reservations/tombstones and callbacks correlate to the public Run. Generic `POST /runs/:runId/resume` remains `409 run_not_resumable`.
+
+Unknown Interactions return `404`; undeclared choices return `400`; decided/cancelled Interactions and conflicting idempotency bodies return `409`. An identical key/body replays the response for 24 hours without another execution. Failure before admission leaves the decision pending and returns `503`. If admission committed but launch acknowledgement is lost/rejected, cleanup stops the attempt and a still-running Run becomes explicitly `failed` with `continuation_launch_unconfirmed`; `200 {run}` and idempotency replay then carry that terminal status rather than stranding a running Run. Cancellation claims prevent later attempts. Checkpoints are in-memory like Run history and disappear on API restart. Only lossless JSON messages at the host boundary are supported: runtime objects, cycles, undefined, sparse arrays, getters, buffers and non-finite numbers are rejected. Nested native Link Call runtime stacks cannot be restored and are explicitly rejected before suspension; arbitrary runtime/context persistence is outside this bridge.
 
 ### Timed contract smoke
 
@@ -146,6 +171,6 @@ For extended project CRUD/capacity/provider acceptance, create `/data/projects/e
 
 `DELETE /api/v1/runs/:runId` accepts completed/failed/rejected/cancelled runs and removes their public detail, events and run-scoped bookkeeping. Active runs return `409 run_active`; unknown/deleted runs return `404`. Conversation/messages, provider sessions, project files and workflow definitions survive. Accepted `Idempotency-Key` responses remain identical for at least 24 hours, even after deletion; their historical run ID then returns `404` rather than dispatching duplicate work. Histories/cache are in-memory and restart limitations still apply.
 
-SSE, artifacts, interactions and run persistence return typed `501`. Inventory does not grant direct invocability.
+SSE, artifacts and run persistence return typed `501`. Inventory does not grant direct invocability.
 
 Primary sources: [native complete flow representation](https://nodered.org/docs/api/admin/types), [complete editor export](https://nodered.org/docs/user-guide/editor/workspace/import-export), [Link Call semantics](https://nodered.org/docs/user-guide/writing-functions#calling-link-nodes).

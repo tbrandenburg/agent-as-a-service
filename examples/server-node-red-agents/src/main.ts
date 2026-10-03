@@ -34,8 +34,24 @@ const backend = new AgentsBackend(
     process.env.WORKFLOW_REGISTRY ?? "/workspace-data/workflows.json",
   ),
   new Projects("/data/projects", "/data/agent-work"),
-  async (id) => workerCall("/stop", { runId: id }),
+  async (id) => workerCall("/stop", { attemptId: id }),
   maxWorkers,
+  async () => {
+    const response = await fetch(`${workerUrl}/capacity`, {
+      headers: { authorization: `Bearer ${internalToken}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error("Worker capacity unavailable");
+    const body: unknown = await response.json();
+    if (
+      !body ||
+      typeof body !== "object" ||
+      !("occupied" in body) ||
+      typeof body.occupied !== "number"
+    )
+      throw new Error("Invalid worker capacity");
+    return body.occupied;
+  },
 );
 const internal = express();
 internal.use(express.json({ limit: "1mb" }));
@@ -72,8 +88,16 @@ internal.post("/finalize", (request, response) => {
   const result = backend.finalize(request.body);
   response.status(result.status).json(result.body);
 });
+internal.post("/interaction-suspend", (request, response) => {
+  const result = backend.suspend(request.body);
+  response.status(result.status).json(result.body);
+});
+internal.post("/interaction-admitted", (request, response) => {
+  const result = backend.admitted(request.body);
+  response.status(result.status).json(result.body);
+});
 internal.post("/worker-failed", (request, response) => {
-  backend.workerFailed(request.body.runId);
+  backend.workerFailed(request.body.runId, request.body.attemptId);
   response.json({ acknowledged: true });
 });
 const privateServer = internal.listen(3095, "0.0.0.0");

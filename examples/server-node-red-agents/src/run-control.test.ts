@@ -143,7 +143,8 @@ describe("Node-RED run controls", () => {
       expect(result.status).toBe(200);
       expect(result.body.run.status).toBe("cancelled");
       expect(result.body.run.error).toBeUndefined();
-      expect(stops).toEqual([id]);
+      expect(stops).toHaveLength(1);
+      expect(stops[0]).not.toBe(id);
       if (status === "running")
         expect(backend.runs.get(id)!.executions).toMatchObject([
           { status: "unconfirmed" },
@@ -177,7 +178,8 @@ describe("Node-RED run controls", () => {
       .send({});
     expect(result.status).toBe(200);
     expect(result.body.run.status).toBe("cancelled");
-    expect(stops).toEqual([id]);
+    expect(stops).toHaveLength(1);
+    expect(stops[0]).not.toBe(id);
   });
 
   it("returns a service failure for uncertain stop, retains the claim, and permits retry", async () => {

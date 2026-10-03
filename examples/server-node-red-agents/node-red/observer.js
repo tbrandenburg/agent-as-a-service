@@ -1,10 +1,10 @@
 const { randomUUID } = require("node:crypto");
 
-function createObserver(hooks, runId, deliver, limit = 4096) {
+function createObserver(hooks, runId, deliver, limit = 4096, initialSequence = 0) {
   const pending = new WeakMap();
   const queue = [];
   const waiters = new Set();
-  let sequence = 0;
+  let sequence = initialSequence;
   let active = false;
   let sending = false;
   let delivery = Promise.resolve();

@@ -60,6 +60,7 @@ When changing the contract, run `make generate` before `make check` and include 
 
 ## Lessons Learned
 
+- 2026-10-03: Pitfall: Committed continuation admission plus lost acknowledgements left a running Run after deliberate worker cleanup. Prevention rule/countermeasure: Test response loss after commit and finalize uncertain launch outcomes explicitly; never infer worker execution from admission alone.
 - 2026-10-02: Pitfall: A reused test image retained stale extracted adapters and bundled schemas. Prevention rule/countermeasure: Rebuild or regenerate every derived runtime artifact before using source-mounted images for acceptance.
 - 2026-10-02: Pitfall: Native Link Out(return) did not emit generic onComplete, invalidating an E2E oracle. Prevention rule/countermeasure: Verify observed delivery and drained closure; never require completion evidence a native node does not emit.
 - 2026-10-02: Pitfall: Public run completion preceded asynchronous node observation drain, making immediate event assertions flaky. Prevention rule/countermeasure: Wait within a bounded deadline for expected observations; do not infer observation delivery from terminal run status.

@@ -8,22 +8,30 @@ const { createObserver } = require("./observer.js");
 const { createHostLinkCaller } = require(process.env.LINK_CALL_MODULE || "./link-call.cjs");
 const { runInput, runOutput } = require(process.env.RUN_SCHEMA_MODULE || "./run-output.cjs");
 
-const [dir, port, runId] = process.argv.slice(2);
+const [dir, port, runId, attemptId = runId, initialSequence = "0"] = process.argv.slice(2);
 if (!dir || !Number.isSafeInteger(Number(port)) || !runId || !process.env.INTERNAL_TOKEN) throw new Error("Invalid worker host configuration");
 process.env.NODE_RED_HOME ||= `${modules}/node-red`;
 const settings = require(join(dir, "settings.js"));
 Object.assign(settings, { userDir: dir, flowFile: join(dir, "flows.json"), settingsFile: join(dir, "settings.js"), uiHost: "127.0.0.1", uiPort: Number(port), httpAdminRoot: false, httpNodeRoot: "/" });
 const app = express();
 const server = http.createServer(app);
-RED.init(server, settings);
 const callback = async (body, path = "/node-observations") => {
   const response = await fetch(`${process.env.WORKER_CALLBACK_URL || "http://api:3095"}${path}`, {
     method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(2000),
+    body: JSON.stringify({ ...body, ...(attemptId !== runId ? { attemptId } : {}) }), signal: AbortSignal.timeout(5000),
   });
   if (!response.ok) throw new Error(`Worker observation rejected (${response.status})`);
 };
-const observer = createObserver(RED.hooks, runId, callback);
+let suspended = false;
+let stopping = false;
+const { serializable, validateResume } = require("./interaction-host.js");
+settings.nodeRedAgentsInteractionHost = { version: 1, async suspend(record) {
+  if (record.version !== 1 || !serializable(record) || (record.msg._linkSource !== undefined && (!Array.isArray(record.msg._linkSource) || record.msg._linkSource.length !== 1))) throw new Error("Interaction checkpoint is not serializable or has a nested Link Call");
+  await callback({ runId, ...record }, "/interaction-suspend");
+  suspended = true;
+} };
+RED.init(server, settings);
+const observer = createObserver(RED.hooks, runId, callback, 4096, Number(initialSequence));
 let caller;
 let invoked = false;
 const timeout = Number(process.env.WORKER_TIMEOUT_MS || 450_000) - 500;
@@ -36,13 +44,22 @@ const authenticate = (request, response, next) => {
 app.post("/activate", authenticate, (_request, response) => { observer.activate(); response.json({ active: true }); });
 // The host listens only after flows:started; readiness never changes user flow JSON.
 app.get("/ready", (_request, response) => response.json({ ready: true }));
-app.post("/invoke", authenticate, express.json({ limit: "1mb" }), (request, response) => {
+app.post("/invoke", authenticate, express.json({ limit: "2mb" }), async (request, response) => {
   const body = request.body;
-  if (!body || body.runId !== runId || typeof body.entry !== "string" || !body.entry || !runInput.safeParse(body.input).success || Object.keys(body).some((key) => !["runId", "input", "entry"].includes(key))) return response.status(400).json({ error: "Invalid invocation" });
+  if (!body || body.runId !== runId || typeof body.entry !== "string" || !body.entry || !runInput.safeParse(body.input).success || Object.keys(body).some((key) => !["runId", "input", "entry", "resume"].includes(key))) return response.status(400).json({ error: "Invalid invocation" });
   if (invoked) return response.status(409).json({ error: "Worker already invoked" });
   invoked = true;
+  if (body.resume) {
+    try {
+      validateResume(RED, body.resume, dir);
+      try { await callback({ runId }, "/interaction-admitted"); }
+      catch { await callback({ runId }, "/interaction-admitted"); }
+    } catch { invoked = false; return response.status(409).json({ error: "Continuation was not admitted" }); }
+  }
   // The host control state is authoritative, regardless of returned flow fields.
-  const operation = caller.call(body.entry, { input: body.input, agentObservation: { runId } }, { timeout });
+  const operation = body.resume
+    ? caller.call(body.resume.plan.nodeId, body.resume.msg, { timeout, resume: body.resume })
+    : caller.call(body.entry, { input: body.input, agentObservation: { runId } }, { timeout });
   response.status(202).json({ accepted: true });
   void operation.then((message) => {
     if (message.error || (message.agentExecution && message.agentExecution.status !== "completed")) throw new Error("Workflow node failed");
@@ -50,7 +67,7 @@ app.post("/invoke", authenticate, express.json({ limit: "1mb" }), (request, resp
   }).catch((error) => {
     console.error("Workflow invocation failed", error instanceof Error ? error.name : "unknown");
     return { status: "failed" };
-  }).then((result) => callback({ runId, eventId: `${runId}:link-call`, ...result }, "/finalize")).catch((error) => {
+  }).then((result) => { if (!suspended && !stopping) return callback({ runId, eventId: `${attemptId}:link-call`, ...result }, "/finalize"); }).catch((error) => {
     console.error("Worker finalization failed", error instanceof Error ? error.message : "unknown");
     caller.close();
     RED.hooks.remove("onComplete.aaas-link-failure");
@@ -76,7 +93,6 @@ RED.start().then(() => Promise.race([flowsStarted, new Promise((_resolve, reject
   });
   server.listen(Number(port), "127.0.0.1");
 }).catch((error) => { console.error("Worker startup failed", error); process.exit(1); });
-let stopping = false;
 process.on("SIGTERM", () => {
   if (stopping) return;
   stopping = true;

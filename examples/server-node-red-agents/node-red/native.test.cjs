@@ -19,6 +19,10 @@ const flow = [
   { id: 'empty', z: 'native', type: 'link in', wires: [['sink']] },
   { id: 'sink', z: 'native', type: 'function', func: 'return null;', outputs: 1, wires: [[]] },
 ];
+const interactionFlow = [
+  { id: 'human', z: 'native', type: 'interaction', name: 'Human', prompt: 'Continue?', promptType: 'str', decisions: [{ id: 'approve', label: 'Approve' }, { id: 'revise', label: 'Revise' }], wires: [['after-human'], []] },
+  { id: 'after-human', z: 'native', type: 'change', rules: [{ t: 'set', p: 'after', pt: 'msg', to: '1', tot: 'num' }], wires: [['native-return']] },
+];
 
 test('Node-RED 5.0.7 native Link Call: generic values, cloning, correlation, first return, missing target, timeout and cleanup', { timeout: 30000 }, async () => {
   assert.equal(require('node-red/package.json').version, '5.0.7');
@@ -26,11 +30,21 @@ test('Node-RED 5.0.7 native Link Call: generic values, cloning, correlation, fir
   const server = http.createServer();
   let caller;
   try {
-    await writeFile(join(dir, 'flows.json'), JSON.stringify(flow));
+    await symlink(join(__dirname, 'node_modules'), join(dir, 'node_modules'));
+    await writeFile(join(dir, 'flows.json'), JSON.stringify([...flow, ...interactionFlow]));
     RED.init(server, { userDir: dir, flowFile: join(dir, 'flows.json'), httpAdminRoot: false, logging: { console: { level: 'off' } } });
     await RED.start();
     while (!RED.nodes.getNode('entry')) await new Promise((done) => setTimeout(done, 50));
     caller = createHostLinkCaller(RED);
+    const human = RED.nodes.getNode('human');
+    const plan = await human.interaction.plan({ before: 1 });
+    const resumed = await caller.call('human', { before: 1, _linkSource: [{ node: 'old-host', id: 'old-call' }] }, { resume: { plan, response: { decision: 'revise', text: 'one more test' } } });
+    assert.equal(resumed.before, 1);
+    assert.equal(resumed.after, 1);
+    assert.equal(resumed._linkSource, undefined);
+    assert.deepEqual(resumed.interaction, { id: plan.interactionId, decision: 'revise', text: 'one more test' });
+    await assert.rejects(caller.call('human', {}, { resume: { plan, response: { decision: 'undeclared' } } }), /Undeclared/);
+    await assert.rejects(caller.call('human', {}, { resume: { plan: { ...plan, version: 2 }, response: { decision: 'approve' } } }), /Invalid interaction plan/);
     for (const input of ['string', 42, false, null, [1, true, null, { nested: ['x', 2.5] }], { repository: 'acme/example', branch: 'feature/link-call', limit: 3, enabled: true, flags: { includeTests: true }, items: ['a', 'b'] }, [{ type: 'text', text: 'part' }]]) {
       const original = { input, agentObservation: { runId: 'control' } };
       const returned = await caller.call('entry', original);
@@ -64,10 +78,16 @@ test('Node-RED 5.0.7 native Link Call: generic values, cloning, correlation, fir
 test('real worker host: multitab/subflow, authenticated async 202, authoritative run ID, JSON output, failures and shutdown', { timeout: 90000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'aaas-host-'));
   const finals = [];
+  const admissions = [];
   const callback = http.createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks));
+    if (request.url === '/interaction-admitted' && body.runId === 'admission-lost') {
+      admissions.push(body);
+      request.socket.destroy();
+      return;
+    }
     if (request.url === '/finalize') finals.push(body);
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end('{}');
@@ -76,7 +96,7 @@ test('real worker host: multitab/subflow, authenticated async 202, authoritative
   const schema = join(root, 'schema.cjs');
   execFileSync(resolve(__dirname, 'node_modules/.bin/esbuild'), [process.env.CONTRACT_SCHEMA_SOURCE || resolve(__dirname, '../../../packages/contract/src/v1/schemas/domain.ts'), '--bundle', '--platform=node', '--format=cjs', `--outfile=${schema}`], { env: { ...process.env, NODE_PATH: resolve(__dirname, 'node_modules') } });
   const children = new Set();
-  async function worker(id, input, target = 'entry', crash = false, snapshot = flow) {
+  async function worker(id, input, target = 'entry', crash = false, snapshot = flow, resume) {
     const dir = join(root, id);
     await require('node:fs/promises').mkdir(dir);
     await symlink(join(__dirname, 'node_modules'), join(dir, 'node_modules'));
@@ -98,6 +118,16 @@ test('real worker host: multitab/subflow, authenticated async 202, authoritative
     }
     assert.equal((await post({ runId: 'other', entry: target, input })).status, 400);
     assert.equal((await post({ runId: id, target, input })).status, 400);
+    if (resume) {
+      assert.equal((await post({ runId: id, entry: target, input, resume })).status, 409);
+      assert.equal(admissions.length, 2, 'both admission responses must be lost');
+      assert.equal(finals.some((value) => value.runId === id), false, 'downstream must not execute without acknowledged admission');
+      const exit = new Promise((done) => child.once('exit', done));
+      child.kill('SIGTERM');
+      const force = setTimeout(() => child.kill('SIGKILL'), 3000);
+      await exit; clearTimeout(force); children.delete(child);
+      return;
+    }
     const before = Date.now();
     assert.equal((await post({ runId: id, entry: target, input })).status, 202);
     assert.ok(Date.now() - before < 1000, 'dispatch must not wait for workflow');
@@ -123,6 +153,11 @@ test('real worker host: multitab/subflow, authenticated async 202, authoritative
     return finals.find((value) => value.runId === id);
   }
   try {
+    await worker('admission-lost', null, 'entry', false, [...flow, ...interactionFlow], {
+      plan: { version: 1, interactionId: 'lost-interaction', nodeId: 'human', nodeName: 'Human', prompt: 'Continue?', decisions: [{ id: 'approve', label: 'Approve' }] },
+      msg: { before: 1, _linkSource: [{ node: 'old-host', id: 'old-call' }] },
+      response: { decision: 'approve' },
+    });
     const multitab = require('./native-fixtures.cjs').multiply.specification;
     const multiplication = await worker('multitab', { a: 13.75, b: -8 }, multitab.entry, false, multitab.flows);
     assert.equal(multiplication.status, 'completed');
