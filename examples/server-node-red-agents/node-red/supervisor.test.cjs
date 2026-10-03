@@ -122,7 +122,7 @@ test("replacement waits for exit and cleanup while a stopping worker holds the l
     const stopPromise = workers.get("finishing").stopping;
     await Promise.resolve();
     assert.equal(workers.get("finishing").stopping, stopPromise);
-    const replacement = start({ runId: "replacement" }, async () => {
+    const replacement = start({ runId: "public", attemptId: "replacement" }, async () => {
       assert.equal(workers.has("finishing"), false);
       assert.equal(workers.size, 3);
       workers.set("replacement", { child: { exitCode: 0 }, dir: await mkdtemp(join(tmpdir(), "aaas-replacement-")), exited: true, exit: Promise.resolve(), timeout: setTimeout(() => {}, 5000) });
@@ -165,23 +165,23 @@ test("two waiting replacements compete for one released slot without exceeding t
   };
   try {
     const cleanup = stop("finishing");
-    const first = start({ runId: "first" }, launch);
-    const second = start({ runId: "second" }, launch);
-    await assert.rejects(start({ runId: "first" }, launch), /Duplicate/);
+    const first = start({ runId: "first", attemptId: "first" }, launch);
+    const second = start({ runId: "second", attemptId: "second" }, launch);
+    await assert.rejects(start({ runId: "first", attemptId: "first" }, launch), /Duplicate/);
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(launched, []);
     finish();
     await cleanup;
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(launched.length, 1);
-    await assert.rejects(start({ runId: launched[0] }, launch), /Duplicate/);
+    await assert.rejects(start({ runId: launched[0], attemptId: launched[0] }, launch), /Duplicate/);
     assert.equal(workers.size, 3);
     releaseLaunch();
     if (launched[0] === "first") await first;
     else await second;
     assert.equal(workers.size, 4);
     const occupied = launched[0];
-    await assert.rejects(start({ runId: occupied }, launch), /Duplicate/);
+    await assert.rejects(start({ runId: occupied, attemptId: occupied }, launch), /Duplicate/);
     await stop(occupied);
     await Promise.all([first, second]);
     assert.deepEqual(new Set(launched), new Set(["first", "second"]));
@@ -211,9 +211,9 @@ test("failed startup releases its reservation for another waiting worker", async
     workers.set(`active-${index}`, { child: { exitCode: 0 }, dir: dirs[index], exited: true, exit: Promise.resolve(), timeout: setTimeout(() => {}, 5000) });
   }
   try {
-    const failed = start({ runId: "failed-start" }, async () => { throw new Error("startup failed"); });
+    const failed = start({ runId: "failed-start", attemptId: "failed-start" }, async () => { throw new Error("startup failed"); });
     let launched = false;
-    const next = start({ runId: "next-start" }, async () => { launched = true; });
+    const next = start({ runId: "next-start", attemptId: "next-start" }, async () => { launched = true; });
     await stop("active-0");
     await assert.rejects(failed, /startup failed/);
     await next;
@@ -229,7 +229,7 @@ test.after(() => server.close());
 test("stop before start rejects future starts without retaining transient state", async () => {
   await Promise.all([stop("before-launch"), stop("before-launch")]);
   let launched = false;
-  await assert.rejects(start({ runId: "before-launch" }, async () => { launched = true; }), /stopped/);
+  await assert.rejects(start({ runId: "public", attemptId: "before-launch" }, async () => { launched = true; }), /stopped/);
   assert.equal(launched, false);
   assert.equal(workers.has("before-launch"), false);
   assert.equal(pending.size, 0);
@@ -241,7 +241,7 @@ test("stop wakes a capacity waiter without waiting for unrelated workers", async
   }
   try {
     let launched = false;
-    const launch = start({ runId: "stop-waiting" }, async () => { launched = true; });
+    const launch = start({ runId: "public", attemptId: "stop-waiting" }, async () => { launched = true; });
     const rejection = assert.rejects(launch, /stopped/);
     assert.equal(waiting.has("stop-waiting"), true);
     await stop("stop-waiting");
@@ -256,13 +256,13 @@ test("stop wakes a capacity waiter without waiting for unrelated workers", async
 
 test("stop after reservation but before launch prevents spawning and releases capacity", async () => {
   let launched = false;
-  const launch = start({ runId: "stop-reserved" }, async () => { launched = true; });
+  const launch = start({ runId: "public", attemptId: "stop-reserved" }, async () => { launched = true; });
   const rejection = assert.rejects(launch, /stopped/);
   assert.equal(starting.has("stop-reserved"), true);
   await stop("stop-reserved");
   await rejection;
   assert.equal(launched, false);
-  await start({ runId: "after-reserved" }, async () => {});
+  await start({ runId: "public", attemptId: "after-reserved" }, async () => {});
   assert.equal(starting.size, 0);
   assert.equal(pending.size, 0);
 });
@@ -273,7 +273,7 @@ test("duplicate stop awaits an asynchronous launch boundary then terminates its 
   const gate = new Promise((resolve) => { release = resolve; });
   const ready = new Promise((resolve) => { entered = resolve; });
   const id = "stop-launching";
-  const launch = start({ runId: id }, async () => {
+  const launch = start({ runId: "public", attemptId: id }, async () => {
     entered();
     await gate;
     const dir = await mkdtemp(join(tmpdir(), "aaas-launch-stop-"));
@@ -292,7 +292,7 @@ test("duplicate stop awaits an asynchronous launch boundary then terminates its 
   release();
   await Promise.all([first, second, rejection]);
   assert.equal(workers.has(id), false);
-  await assert.rejects(start({ runId: id }, async () => {}), /stopped/);
+  await assert.rejects(start({ runId: "public", attemptId: id }, async () => {}), /stopped/);
   assert.equal(pending.size, 0);
   assert.equal(starting.size, 0);
   assert.equal(waiting.size, 0);

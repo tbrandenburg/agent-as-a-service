@@ -11,7 +11,7 @@ RUN NODE_PATH=/data/node_modules /data/node_modules/.bin/esbuild /tmp/contract-s
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/cwd-list/ /data/node_modules/node-red-contrib-cwd-list-example/
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/settings.js /seed/settings.js
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/supervisor.js /seed/supervisor.js
-COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/worker-host.js examples/server-node-red-agents/node-red/observer.js /seed/
+COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/worker-host.js examples/server-node-red-agents/node-red/observer.js examples/server-node-red-agents/node-red/interaction-host.js /seed/
 RUN mkdir -p /data/agent-work /data/projects && chown -R node-red:node-red /data /seed
 RUN rm -f /data/flows.json
 WORKDIR /usr/src/node-red

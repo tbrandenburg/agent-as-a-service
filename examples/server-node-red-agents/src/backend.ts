@@ -5,6 +5,8 @@ import type { Store } from "./registry.js";
 import { snapshot, validate } from "./native.js";
 import { core } from "./core.js";
 import { continuation } from "./continuation.js";
+import { plan, serializable } from "./interaction.js";
+import type { Checkpoint, Resume } from "./interaction.js";
 import type { Definition, Input, Registry, Specification } from "./native.js";
 import { Projects, ProjectError } from "./projects.js";
 import { notImplementedRoutes } from "../../server-express/src/index.js";
@@ -49,6 +51,16 @@ type Execution = {
 };
 type Job = {
   run: Run;
+  accepted: Specification;
+  attemptId: string;
+  checkpoint?: Checkpoint;
+  releasing?: Promise<void>;
+  decision?: {
+    interaction: z.infer<typeof schemas.interaction>;
+    body: { decision: string; comment?: string };
+    key?: string;
+    response?: z.infer<typeof schemas.runAction>;
+  };
   turn?: {
     message: Message;
     expectResume: boolean;
@@ -73,6 +85,9 @@ type Result = {
 };
 export type Executor = (payload: {
   runId: string;
+  attemptId: string;
+  sequence: number;
+  resume?: Resume;
   input: z.infer<typeof schemas.runInput>;
   entry: string;
   cwd?: string;
@@ -162,7 +177,10 @@ export class AgentsBackend {
     string,
     {
       body: string;
-      response: Detail | z.infer<typeof schemas.sentMessage>;
+      response:
+        | Detail
+        | z.infer<typeof schemas.sentMessage>
+        | z.infer<typeof schemas.runAction>;
       expires: number;
     }
   >();
@@ -175,7 +193,259 @@ export class AgentsBackend {
     private readonly projects?: Projects,
     private readonly stopWorker?: (id: string) => Promise<void>,
     private readonly maxWorkers = 4,
+    private readonly capacity?: () => Promise<number>,
   ) {}
+
+  private async available() {
+    // Real admission/reservations are owned by the supervisor, including turnover.
+    try {
+      return this.capacity ? (await this.capacity()) < this.maxWorkers : true;
+    } catch {
+      console.error("Worker capacity lookup failed");
+      return false;
+    }
+  }
+
+  suspend(value: unknown): Result {
+    if (
+      !record(value) ||
+      !text(value.runId) ||
+      !text(value.attemptId) ||
+      value.version !== 1 ||
+      !serializable(value.plan) ||
+      !plan.safeParse(value.plan).success ||
+      !record(value.msg) ||
+      !serializable(value.msg) ||
+      (value.msg._linkSource !== undefined &&
+        (!Array.isArray(value.msg._linkSource) ||
+          value.msg._linkSource.length !== 1))
+    )
+      return reject("Invalid interaction checkpoint", 400);
+    const job = this.jobs.get(value.runId);
+    if (
+      job &&
+      job.attemptId === value.attemptId &&
+      this.writable(job, "paused") &&
+      job.checkpoint &&
+      canonical(job.checkpoint) ===
+        canonical({ plan: value.plan, msg: value.msg })
+    )
+      return { status: 200, body: { acknowledged: true } };
+    if (
+      !job ||
+      job.attemptId !== value.attemptId ||
+      !this.writable(job, "running") ||
+      !this.stopWorker
+    )
+      return reject("Run is not suspendable");
+    const parsed = plan.parse(value.plan);
+    if (
+      !job.accepted.flows.some(
+        (node) => node.id === parsed.nodeId && node.type === "interaction",
+      ) ||
+      [...this.runs.values()].some((detail) =>
+        detail.interactions?.some((item) => item.id === parsed.interactionId),
+      )
+    )
+      return reject("Invalid interaction identity");
+    job.checkpoint = structuredClone({ plan: parsed, msg: value.msg });
+    const interaction: z.infer<typeof schemas.interaction> = {
+      id: parsed.interactionId,
+      runId: job.run.id,
+      prompt: parsed.prompt,
+      decisions: parsed.decisions.map((choice) => choice.id),
+      status: "pending",
+    };
+    const detail = this.runs.get(job.run.id)!;
+    (detail.interactions ??= []).push(interaction);
+    this.update(job.run, "paused");
+    const attempt = job.attemptId;
+    job.releasing = new Promise<void>((resolve, failure) =>
+      setImmediate(() => {
+        void this.stopWorker!(attempt).then(() => {
+          job.dispatched = false;
+          resolve();
+        }, failure);
+      }),
+    );
+    void job.releasing.catch(() =>
+      console.error("Paused execution worker cleanup failed"),
+    );
+    return { status: 200, body: { acknowledged: true } };
+  }
+
+  admitted(value: unknown): Result {
+    if (!record(value) || !text(value.runId) || !text(value.attemptId))
+      return reject("Invalid continuation admission", 400);
+    const job = this.jobs.get(value.runId);
+    if (
+      job &&
+      job.attemptId === value.attemptId &&
+      job.decision?.response &&
+      !job.cancelRequested
+    )
+      return { status: 200, body: { acknowledged: true } };
+    if (
+      !job ||
+      job.attemptId !== value.attemptId ||
+      !job.decision ||
+      !this.writable(job, "paused") ||
+      job.decision.interaction.status !== "pending"
+    )
+      return reject("Continuation is no longer pending");
+    const claim = job.decision;
+    claim.interaction.status = "decided";
+    claim.interaction.decision = claim.body.decision;
+    if (claim.body.comment !== undefined)
+      claim.interaction.comment = claim.body.comment;
+    job.checkpoint = undefined;
+    job.nodeDrained = false;
+    this.update(job.run, "running");
+    claim.response = structuredClone({ run: job.run });
+    if (claim.key)
+      this.keys.set(claim.key, {
+        body: canonical(claim.body),
+        response: claim.response,
+        expires: Date.now() + 86_400_000,
+      });
+    return { status: 200, body: { acknowledged: true } };
+  }
+
+  private async decide(
+    id: string,
+    body: { decision: string; comment?: string },
+    header?: string,
+  ) {
+    const key = this.key(`/api/v1/interactions/${id}/decisions`, header);
+    const previous = key && this.keys.get(key);
+    if (previous && previous.expires > Date.now())
+      return previous.body === canonical(body)
+        ? {
+            status: 200 as const,
+            body: structuredClone(
+              previous.response as z.infer<typeof schemas.runAction>,
+            ),
+          }
+        : errorResponse(
+            409,
+            "idempotency_conflict",
+            "Key already used for another body",
+          );
+    const detail = [...this.runs.values()].find((detail) =>
+      detail.interactions?.some((item) => item.id === id),
+    );
+    const interaction = detail?.interactions?.find((item) => item.id === id);
+    if (!interaction || !detail) return missing("Interaction");
+    const job = this.jobs.get(detail.run.id)!;
+    if (
+      interaction.status !== "pending" ||
+      !this.writable(job, "paused") ||
+      job.decision
+    )
+      return errorResponse(
+        409,
+        "interaction_not_pending",
+        "Interaction is no longer pending",
+      );
+    if (!interaction.decisions?.includes(body.decision))
+      return invalid("Undeclared interaction decision");
+    const checkpoint = job.checkpoint;
+    if (
+      !checkpoint ||
+      !plan.safeParse(checkpoint.plan).success ||
+      !record(checkpoint.msg) ||
+      !serializable(checkpoint.msg) ||
+      checkpoint.plan.interactionId !== id
+    )
+      return errorResponse(
+        409,
+        "checkpoint_invalid",
+        "Interaction continuation checkpoint is unavailable",
+      );
+    job.decision = { interaction, body, key };
+    try {
+      try {
+        await job.releasing;
+      } catch {
+        await this.stopWorker!(job.attemptId);
+        job.dispatched = false;
+        job.releasing = undefined;
+      }
+      if (!this.writable(job, "paused"))
+        return errorResponse(
+          409,
+          "interaction_not_pending",
+          "Run is no longer paused",
+        );
+      job.attemptId = randomUUID();
+      job.dispatched = true;
+      await this.dispatch({
+        runId: job.run.id,
+        attemptId: job.attemptId,
+        sequence: job.nodeSequence,
+        input: job.run.input ?? null,
+        ...structuredClone(job.accepted),
+        cwd: job.cwd,
+        resume: {
+          ...structuredClone(checkpoint),
+          response: {
+            decision: body.decision,
+            ...(body.comment === undefined ? {} : { text: body.comment }),
+          },
+        },
+      });
+      if (!job.decision.response)
+        throw new Error("Continuation was not admitted");
+      return { status: 200 as const, body: job.decision.response };
+    } catch {
+      if (job.decision.response) {
+        // Admission may have committed while its acknowledgement was lost.
+        // A rejected/uncertain launch cannot leave a running Run without a worker.
+        try {
+          await this.stopWorker!(job.attemptId);
+          job.dispatched = false;
+        } catch {
+          console.error("Admitted continuation worker cleanup is unconfirmed");
+        }
+        if (this.writable(job, "running")) {
+          this.closeNodes(job, "continuation_launch_unconfirmed");
+          this.update(job.run, "failed", {
+            error: {
+              code: "continuation_launch_unconfirmed",
+              message: "Admitted continuation launch could not be confirmed",
+            },
+          });
+        }
+        const response = structuredClone({ run: job.run });
+        if (key)
+          this.keys.set(key, {
+            body: canonical(body),
+            response,
+            expires: Date.now() + 86_400_000,
+          });
+        return { status: 200 as const, body: response };
+      }
+      if (job.dispatched) {
+        try {
+          await this.stopWorker?.(job.attemptId);
+          job.dispatched = false;
+        } catch {
+          return errorResponse(
+            503,
+            "worker_stop_failed",
+            "Continuation worker cleanup is unconfirmed",
+          );
+        }
+      }
+      return errorResponse(
+        503,
+        "continuation_unavailable",
+        "Continuation was not admitted; decision remains pending",
+      );
+    } finally {
+      job.decision = undefined;
+    }
+  }
 
   async initialize(): Promise<void> {
     await this.projects?.initialize();
@@ -365,9 +635,10 @@ export class AgentsBackend {
     try {
       if (job.dispatched) {
         if (!this.stopWorker) throw new Error("Worker stop unavailable");
-        await this.stopWorker(id);
+        await this.stopWorker(job.attemptId);
       }
       this.update(job.run, "cancelled");
+      job.checkpoint = undefined;
       this.event(
         job.run,
         "run.cancelled",
@@ -422,6 +693,8 @@ export class AgentsBackend {
       return reject("Invalid node observation batch", 400);
     const job = this.jobs.get(value.runId);
     if (!job) return reject("Unknown run");
+    if (value.attemptId !== undefined && value.attemptId !== job.attemptId)
+      return reject("Stale worker attempt");
     const observations = value.observations;
     let next = job.nodeSequence;
     const pending = new Map(job.nodeExecutions);
@@ -455,7 +728,8 @@ export class AgentsBackend {
       }
       if (
         job.nodeDrained ||
-        !["running", "completed", "failed"].includes(job.run.status) ||
+        (!["running", "completed", "failed"].includes(job.run.status) &&
+          !(job.run.status === "paused" && job.checkpoint)) ||
         sequence !== next + 1
       )
         return reject("Node observation out of order");
@@ -534,7 +808,10 @@ export class AgentsBackend {
       return reject("Invalid node drain", 400);
     const job = this.jobs.get(value.runId);
     if (!job) return reject("Unknown run");
-    this.closeNodes(job, value.incomplete as string | undefined);
+    if (value.attemptId !== undefined && value.attemptId !== job.attemptId)
+      return reject("Stale worker attempt");
+    if (job.run.status !== "paused")
+      this.closeNodes(job, value.incomplete as string | undefined);
     return { status: 200, body: { acknowledged: true } };
   }
 
@@ -822,6 +1099,12 @@ export class AgentsBackend {
         ? prior.result
         : reject("Conflicting finalization");
     const job = this.jobs.get(value.runId);
+    if (
+      job &&
+      value.attemptId !== undefined &&
+      value.attemptId !== job.attemptId
+    )
+      return reject("Stale worker attempt");
     if (!job || !this.writable(job, "running"))
       return reject("Run is not active");
     if (
@@ -867,15 +1150,21 @@ export class AgentsBackend {
     if (this.stopWorker)
       setImmediate(
         () =>
-          void this.stopWorker!(value.runId as string).catch(() => {
+          void this.stopWorker!(job.attemptId).catch(() => {
             console.error("Finalized execution worker cleanup failed");
           }),
       );
     return result;
   }
 
-  workerFailed(id: string) {
+  workerFailed(id: string, attemptId?: string) {
     const job = this.jobs.get(id);
+    if (
+      job &&
+      ((attemptId !== undefined && attemptId !== job.attemptId) ||
+        (job.run.status === "paused" && job.checkpoint))
+    )
+      return;
     if (job && !job.nodeDrained) this.closeNodes(job, "worker_failed");
     if (job && this.writable(job))
       this.update(job.run, "failed", {
@@ -908,6 +1197,8 @@ export class AgentsBackend {
     try {
       await this.dispatch({
         runId: job.run.id,
+        attemptId: job.attemptId,
+        sequence: job.nodeSequence,
         input,
         entry,
         cwd,
@@ -936,6 +1227,31 @@ export class AgentsBackend {
   implementation(): ApiImplementation {
     return {
       ...notImplementedRoutes,
+      interactions: {
+        listPendingInteractions: async ({ query }) => {
+          const items = [...this.runs.values()]
+            .filter(
+              ({ run }) =>
+                run.status === "paused" &&
+                (!query.projectId || run.projectId === query.projectId) &&
+                !this.jobs.get(run.id)?.cancelRequested,
+            )
+            .flatMap(
+              (detail) =>
+                detail.interactions?.filter(
+                  (item) => item.status === "pending",
+                ) ?? [],
+            );
+          const page = this.page(items, query.cursor, query.limit);
+          return page
+            ? { status: 200, body: structuredClone(page) }
+            : invalid("Invalid cursor");
+        },
+        submitInteractionDecision: ({ params, body, headers }) =>
+          this.serial(() =>
+            this.decide(params.interactionId, body, headers["idempotency-key"]),
+          ),
+      },
       projects: {
         ...notImplementedRoutes.projects,
         listProjects: async ({ query }) => {
@@ -1116,11 +1432,7 @@ export class AgentsBackend {
               );
             const definition = this.definition(body.target.id);
             if (!definition) return missing("Workflow");
-            if (
-              [...this.jobs.values()].filter(({ run }) =>
-                ["queued", "running", "paused"].includes(run.status),
-              ).length >= this.maxWorkers
-            )
+            if (!(await this.available()))
               return errorResponse(
                 503,
                 "workers_busy",
@@ -1156,6 +1468,8 @@ export class AgentsBackend {
             this.update(run, "queued");
             const job: Job = {
               run,
+              accepted: structuredClone(accepted),
+              attemptId: randomUUID(),
               cancelRequested: false,
               stopping: false,
               dispatched: false,
@@ -1328,10 +1642,7 @@ export class AgentsBackend {
                 "conversation_not_resumable",
                 "Conversation source is unavailable",
               );
-            if (
-              [...this.jobs.values()].filter((job) => active(job.run)).length >=
-              this.maxWorkers
-            )
+            if (!(await this.available()))
               return errorResponse(
                 503,
                 "workers_busy",
@@ -1368,6 +1679,8 @@ export class AgentsBackend {
             };
             const job: Job = {
               run,
+              accepted: structuredClone(accepted),
+              attemptId: randomUUID(),
               turn: { message, expectResume: !!sessionID, source },
               cancelRequested: false,
               stopping: false,

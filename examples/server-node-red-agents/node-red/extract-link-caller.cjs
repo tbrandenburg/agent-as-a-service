@@ -23,12 +23,18 @@ async function extract() {
       const original = execFileSync("tar", ["-xOf", path, source], { timeout: 10_000 });
       const preflight = "const validation = validateTarget(RED, target, { flow });";
       const exports = "module.exports = { createHostLinkCaller, resolveFlow, validateTarget };";
+      const seams = ["function call(target, msg, { flow,", 'targetNode.type !== "link in"', "input._linkSource ??= [];", "targetNode.receive(input);"];
+      if (name === "link-call.cjs" && seams.some((seam) => !original.toString().includes(seam))) throw new Error("Upstream continuation patch no longer applies");
       if (name === "link-call.cjs" && (!original.toString().includes(preflight) || !original.toString().includes(exports) || !original.toString().includes("function createHostLinkCaller(RED)"))) throw new Error("Upstream preflight patch no longer applies");
       // Trusted complete flows can cross Links/subflows. Runtime lookup and timeout
       // are authoritative; preserve the upstream call/return implementation.
       const content = name === "link-call.cjs"
         ? `"use strict";\nconst crypto = require("node:crypto");\n${original.toString().slice(original.toString().indexOf("function createHostLinkCaller(RED)"))}`
           .replace(preflight, "const validation = { ok: true, targetId: target, warnings: [] };")
+          .replace("function call(target, msg, { flow,", "function call(target, msg, { resume, flow,")
+          .replace('targetNode.type !== "link in"', '(resume ? targetNode.type !== "interaction" || targetNode.interaction?.version !== 1 : targetNode.type !== "link in")')
+          .replace("input._linkSource ??= [];", "if (resume) input._linkSource = [];\n    input._linkSource ??= [];")
+          .replace("targetNode.receive(input);", "if (resume) targetNode.interaction.resume(resume.plan, input, resume.response);\n        else targetNode.receive(input);")
           .replace(exports, "module.exports = { createHostLinkCaller };")
         : original;
       await writeFile(join(resolve(destination), name), content);

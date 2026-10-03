@@ -96,6 +96,8 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 
 The complete command list is in [`Makefile`](Makefile). After changing the contract, run `make generate` before `make check` and commit the generated files.
 
+The [Node-RED agents example](/examples/server-node-red-agents/README.md#human-interactions) implements pending Interaction discovery and human decisions with worker-free waits and same-Run continuation from the accepted snapshot. Run its provider-free native/public-HTTP acceptance with `bash examples/server-node-red-agents/interaction-e2e.sh`; sanitized HTTP and private worker lifecycle evidence is saved under `/tmp/opencode/`.
+
 GitHub Actions runs Security, Lint, Format, Tests and a distinct Contract check on pushes and pull requests. The Contract job validates schemas and [published JSON examples](/docs/api-examples.json), OpenAPI/parity invariants and generated-artifact drift. Security audits both root and Node-RED agent lockfiles. Real Node-RED runtime acceptance is path-filtered to relevant example/shared dependency changes; provider-backed walkthroughs remain manual. Install dependencies with `make install` before running individual checks locally.
 
 ## Build a client or server
