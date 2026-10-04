@@ -1,5 +1,5 @@
 {
-  "name": "@agent-as-a-service/node-red-host",
+  "name": "@tbrandenburg/node-red-host",
   "version": "0.1.0",
   "description": "Disposable execution host for a separately installed Node-RED runtime",
   "license": "MIT",
