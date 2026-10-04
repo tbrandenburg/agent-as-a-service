@@ -1,4 +1,4 @@
-# @agent-as-a-service/node-red-host
+# @tbrandenburg/node-red-host
 
 Disposable worker host for an independently installed Node-RED runtime. It exposes the existing private execution protocol on port 1881 and runs each accepted attempt in a short-lived embedded Node-RED process.
 

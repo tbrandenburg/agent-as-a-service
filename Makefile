@@ -1,5 +1,9 @@
 .DEFAULT_GOAL := help
-.PHONY: help install generate openapi catalog parity-doc check check-contract check-generated security lint format-check typecheck test test-contract test-native-node-red-agents validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents smoke-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
+
+NODE_RED_HOST_PACKAGE_DIR := packages/node-red-host
+NODE_RED_HOST_PACKAGE_JSON := $(NODE_RED_HOST_PACKAGE_DIR)/package.json
+BUMP ?=
+.PHONY: help install generate openapi catalog parity-doc check check-contract check-generated security release lint format-check typecheck test test-contract test-native-node-red-agents validate-openapi parity format dev start start-opencode start-node-red demo-express demo-opencode demo-node-red demo-node-red-agents smoke-node-red-agents spawn-node-red-agents start-node-red-agents status-node-red-agents logs-node-red-agents stop-node-red-agents cleanup-node-red-agents
 
 help:
 	@printf '%s\n' \
@@ -7,6 +11,7 @@ help:
 	  'generate          Regenerate OpenAPI, catalog and Archon parity document' \
 	  'check             Run lint, typecheck, tests, OpenAPI/parity and format checks' \
 	  'security          Audit root and Node-RED agent npm dependencies' \
+	  'release           Validate, bump and tag node-red-host (BUMP=patch|minor|major)' \
 	  'lint              Lint TypeScript source with Oxlint' \
 	  'check-contract    Check contract tests, OpenAPI/parity and generated artifacts' \
 	  'check-generated   Regenerate published artifacts and fail on drift' \
@@ -53,12 +58,31 @@ check-contract: test-contract validate-openapi parity check-generated
 
 check-generated: generate
 	git diff --exit-code HEAD -- openapi.json docs/catalog.md docs/rest-parity.md
-	npm run build:validator --workspace=@agent-as-a-service/node-red-host
+	npm run build:validator --workspace=@tbrandenburg/node-red-host
 	git diff --exit-code -- packages/node-red-host/lib/run-output.cjs
 
 security:
 	npm audit
 	npm audit --prefix examples/server-node-red-agents/node-red
+
+release:
+	@case "$(BUMP)" in \
+		patch|minor|major) ;; \
+		*) echo "usage: make release BUMP=patch|minor|major"; exit 1;; \
+	esac
+	@status="$$(git status --porcelain --untracked-files=all)" && [ -z "$$status" ] || \
+		(echo "release: working tree has uncommitted or untracked changes -- commit or stash first" && exit 1)
+	$(MAKE) install
+	$(MAKE) security
+	$(MAKE) check
+	cd $(NODE_RED_HOST_PACKAGE_DIR) && npm pack --dry-run
+	cd $(NODE_RED_HOST_PACKAGE_DIR) && npm version $(BUMP) --no-git-tag-version
+	npm install --package-lock-only --workspaces >/dev/null
+	git add $(NODE_RED_HOST_PACKAGE_JSON) package-lock.json
+	git commit -m "release: node-red-host v`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"`"
+	git tag -a "node-red-host@`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"`" -m "release: node-red-host v`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"`"
+	@echo "Tagged node-red-host@`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"` on `git rev-parse --short HEAD`."
+	@echo "Next: git push --follow-tags. The tag triggers the OIDC npm publish workflow."
 
 lint:
 	npm run lint

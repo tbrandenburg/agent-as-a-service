@@ -2,9 +2,9 @@ FROM nodered/node-red:5.0.7
 USER root
 RUN npm install -g opencode-ai@1.18.33 --ignore-scripts=false
 COPY packages/node-red-host/ /opt/node-red-host/
-RUN npm pack /opt/node-red-host --pack-destination /tmp \
-    && npm install -g /tmp/agent-as-a-service-node-red-host-0.1.0.tgz \
-    && npm ls -g @agent-as-a-service/node-red-host \
+RUN package=$(npm pack /opt/node-red-host --pack-destination /tmp) \
+    && npm install -g "/tmp/$package" \
+    && npm ls -g @tbrandenburg/node-red-host \
     && node --version \
     && node -p "require('/usr/src/node-red/node_modules/node-red/package.json').version + ' ' + require.resolve('/usr/src/node-red/node_modules/node-red')"
 COPY --chown=node-red:node-red examples/server-node-red-agents/node-red/package.json examples/server-node-red-agents/node-red/package-lock.json /data/
