@@ -9,7 +9,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings --ignore-pattern=packages/node-red-host/lib/run-output.cjs packages scripts examples",
-    "test": "vitest run && npm run test --workspace=@agent-as-a-service/node-red-host",
+    "test": "vitest run && npm run test --workspace=@tbrandenburg/node-red-host",
     "test:contract": "vitest run packages/contract",
     "openapi": "node --import tsx scripts/openapi.ts",
     "start": "node --import tsx examples/server-express/src/main.ts",
