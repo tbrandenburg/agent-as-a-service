@@ -7,4 +7,4 @@ services:
       - projects:/data/projects
       - global-work:/data/agent-work
     command:
-      - "set -e; mkdir -p /data/agent-work /data/projects; exec node /seed/supervisor.js"
+      - "set -e; mkdir -p /data/agent-work /data/projects; exec aaas-node-red-host"

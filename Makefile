@@ -53,6 +53,8 @@ check-contract: test-contract validate-openapi parity check-generated
 
 check-generated: generate
 	git diff --exit-code HEAD -- openapi.json docs/catalog.md docs/rest-parity.md
+	npm run build:validator --workspace=@agent-as-a-service/node-red-host
+	git diff --exit-code -- packages/node-red-host/lib/run-output.cjs
 
 security:
 	npm audit

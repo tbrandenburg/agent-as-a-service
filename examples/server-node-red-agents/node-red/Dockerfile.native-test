@@ -3,11 +3,14 @@ USER root
 WORKDIR /data
 COPY examples/server-node-red-agents/node-red/package.json examples/server-node-red-agents/node-red/package-lock.json ./
 RUN npm ci --omit=dev
+COPY packages/node-red-host/ /packages/node-red-host/
 COPY packages/contract/src/v1/schemas/ /contract-schemas/
 COPY examples/server-node-red-agents/node-red/ /data/
 COPY examples/server-node-red-agents/src/native-fixtures.ts /tmp/native-fixtures.ts
 RUN /data/node_modules/.bin/esbuild /tmp/native-fixtures.ts --bundle --platform=node --format=cjs --outfile=/data/native-fixtures.cjs
-RUN node /data/extract-link-caller.cjs /data
+RUN mkdir -p /data/agent-work /data/projects
 ENV NODE_PATH=/usr/src/node-red/node_modules CONTRACT_SCHEMA_SOURCE=/contract-schemas/domain.ts DEFAULT_MODEL=github-copilot/gpt-6-luna
+ENV NODE_RED_TEST_MODULES=/usr/src/node-red/node_modules
+ENV INTERNAL_TOKEN=native-test-token WORKER_CALLBACK_URL=http://127.0.0.1:3095
 ENTRYPOINT ["node", "--test", "--test-reporter=tap"]
-CMD ["native.test.cjs", "observer.test.cjs", "supervisor.test.cjs", "interaction-host.test.cjs"]
+CMD ["native.test.cjs", "observer.test.cjs", "supervisor.test.cjs", "interaction-host.test.cjs", "/packages/node-red-host/test/config.test.cjs"]
