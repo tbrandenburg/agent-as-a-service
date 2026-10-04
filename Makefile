@@ -70,8 +70,8 @@ release:
 		patch|minor|major) ;; \
 		*) echo "usage: make release BUMP=patch|minor|major"; exit 1;; \
 	esac
-	@git diff --quiet && git diff --cached --quiet || \
-		(echo "release: working tree has uncommitted changes -- commit or stash first" && exit 1)
+	@status="$$(git status --porcelain --untracked-files=all)" && [ -z "$$status" ] || \
+		(echo "release: working tree has uncommitted or untracked changes -- commit or stash first" && exit 1)
 	$(MAKE) install
 	$(MAKE) security
 	$(MAKE) check

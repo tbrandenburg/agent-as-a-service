@@ -2,8 +2,8 @@ FROM nodered/node-red:5.0.7
 USER root
 RUN npm install -g opencode-ai@1.18.33 --ignore-scripts=false
 COPY packages/node-red-host/ /opt/node-red-host/
-RUN npm pack /opt/node-red-host --pack-destination /tmp \
-    && npm install -g /tmp/tbrandenburg-node-red-host-0.1.0.tgz \
+RUN package=$(npm pack /opt/node-red-host --pack-destination /tmp) \
+    && npm install -g "/tmp/$package" \
     && npm ls -g @tbrandenburg/node-red-host \
     && node --version \
     && node -p "require('/usr/src/node-red/node_modules/node-red/package.json').version + ' ' + require.resolve('/usr/src/node-red/node_modules/node-red')"

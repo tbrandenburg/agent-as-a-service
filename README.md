@@ -78,6 +78,7 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make check-generated` | Regenerate published artifacts and fail if they differ from Git. |
 | `make test-native-node-red-agents` | Run isolated real Node-RED boundary and failure tests. |
 | `make security` | Audit the root and Node-RED agent npm lockfiles. |
+| `make release BUMP=patch\|minor\|major` | Validate, bump, commit and tag the Node-RED host package. |
 | `make lint` | Lint TypeScript source with Oxlint. |
 | `make format-check` | Check TypeScript formatting with Prettier. |
 | `make demo-express` | Run the simulated HTTP walkthrough. |
@@ -95,6 +96,8 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make help` | List the main targets. |
 
 The complete command list is in [`Makefile`](Makefile). After changing the contract, run `make generate` before `make check` and commit the generated files.
+
+To release `@tbrandenburg/node-red-host`, run `make release BUMP=patch` (or `minor` / `major`) from a clean working tree, including no nonignored untracked files. The target validates the repository, updates the package version and workspace lockfile, and creates a release commit and annotated `node-red-host@X.Y.Z` tag. Push with `git push --follow-tags` to trigger the publishing workflow. The Node-RED agents Docker image installs the tarball produced by `npm pack`, using the current package version.
 
 The [Node-RED agents example](/examples/server-node-red-agents/README.md#human-interactions) implements pending Interaction discovery and human decisions with worker-free waits and same-Run continuation from the accepted snapshot. Run its provider-free native/public-HTTP acceptance with `bash examples/server-node-red-agents/interaction-e2e.sh`; sanitized HTTP and private worker lifecycle evidence is saved under `/tmp/opencode/`.
 
