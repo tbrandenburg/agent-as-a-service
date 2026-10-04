@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Disposable execution host for a separately installed Node-RED runtime",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tbrandenburg/agent-as-a-service.git",
+    "directory": "packages/node-red-host"
+  },
   "type": "commonjs",
   "bin": {
     "aaas-node-red-host": "bin/aaas-node-red-host.cjs"
