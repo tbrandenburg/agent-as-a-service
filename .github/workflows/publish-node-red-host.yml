@@ -104,11 +104,11 @@ jobs:
       - run: npm ci
 
       - name: Test node-red-host package
-        run: npm test --workspace=@agent-as-a-service/node-red-host
+        run: npm test --workspace=@tbrandenburg/node-red-host
 
       - name: Verify bundled validator is current
         run: |
-          npm run build:validator --workspace=@agent-as-a-service/node-red-host
+          npm run build:validator --workspace=@tbrandenburg/node-red-host
           git diff --exit-code -- packages/node-red-host/lib/run-output.cjs
 
       - name: npm pack dry-run sanity check
