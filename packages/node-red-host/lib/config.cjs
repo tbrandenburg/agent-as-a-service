@@ -1,12 +1,13 @@
 const { existsSync, statSync } = require("node:fs");
 const { realpathSync } = require("node:fs");
 const { dirname, join, resolve } = require("node:path");
+const { createRequire } = require("node:module");
 
 const packageDir = resolve(__dirname, "..");
 
 function resolveNodeRedModules() {
   const configured = process.env.NODE_RED_MODULES;
-  const candidates = configured ? [configured] : [];
+  const candidates = configured ? [resolve(configured)] : [];
   if (!configured) {
     try {
       candidates.push(dirname(dirname(require.resolve("node-red/package.json", { paths: [process.cwd()] }))));
@@ -15,10 +16,26 @@ function resolveNodeRedModules() {
   }
   for (const candidate of candidates) {
     const modules = resolve(candidate);
-    if (existsSync(join(modules, "node-red/package.json")) && existsSync(join(modules, "express/package.json"))) return realpathSync(modules);
+    try {
+      const nodeRedRequire = createNodeRedRequire(modules);
+      nodeRedRequire("node-red");
+      const expressPath = nodeRedRequire.resolve("express");
+      nodeRedRequire(expressPath);
+      return realpathSync(modules);
+    } catch { /* Try the next runtime candidate. */ }
   }
-  if (configured) throw new Error(`Configured NODE_RED_MODULES does not contain Node-RED and Express: ${resolve(configured)}`);
+  if (configured) throw new Error(`Configured NODE_RED_MODULES does not contain a loadable Node-RED runtime with Express: ${resolve(configured)}`);
   throw new Error("Unable to resolve Node-RED and Express; set NODE_RED_MODULES to their shared node_modules directory");
+}
+
+function createNodeRedRequire(modules) {
+  return createRequire(require.resolve(join(modules, "node-red")));
+}
+
+function callbackDestination(path) {
+  const base = process.env.WORKER_CALLBACK_URL;
+  if (!base || typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid callback destination");
+  return `${base.replace(/\/+$/, "")}${path}`;
 }
 
 function resolveConfig() {
@@ -30,7 +47,9 @@ function resolveConfig() {
   try {
     const parsed = new URL(callbackBase);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
-    callbackUrl = callbackBase.replace(/\/$/, "");
+    if (!parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error();
+    if (!/^\/+$/u.test(parsed.pathname)) throw new Error();
+    callbackUrl = parsed.origin;
   } catch {
     throw new Error("WORKER_CALLBACK_URL must be an HTTP(S) base URL");
   }
@@ -52,4 +71,4 @@ function resolveConfig() {
   };
 }
 
-module.exports = { packageDir, resolveConfig, resolveNodeRedModules };
+module.exports = { packageDir, resolveConfig, resolveNodeRedModules, createNodeRedRequire, callbackDestination };

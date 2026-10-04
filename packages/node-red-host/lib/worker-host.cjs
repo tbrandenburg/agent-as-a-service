@@ -1,8 +1,10 @@
 const http = require("node:http");
-const { resolveNodeRedModules } = require("./config.cjs");
+const { createRequire } = require("node:module");
+const { resolveNodeRedModules, callbackDestination } = require("./config.cjs");
 const modules = resolveNodeRedModules();
-const express = require(`${modules}/express`);
-const RED = require(`${modules}/node-red`);
+const nodeRedRequire = createRequire(require.resolve(`${modules}/node-red`));
+const express = nodeRedRequire("express");
+const RED = nodeRedRequire("node-red");
 const { join } = require("node:path");
 const { timingSafeEqual } = require("node:crypto");
 const { createObserver } = require("./observer.cjs");
@@ -17,7 +19,7 @@ Object.assign(settings, { userDir: dir, flowFile: join(dir, "flows.json"), setti
 const app = express();
 const server = http.createServer(app);
 const callback = async (body, path = "/node-observations") => {
-  const response = await fetch(`${process.env.WORKER_CALLBACK_URL}${path}`, {
+  const response = await fetch(callbackDestination(path), {
     method: "POST", headers: { authorization: `Bearer ${process.env.INTERNAL_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ ...body, ...(attemptId !== runId ? { attemptId } : {}) }), signal: AbortSignal.timeout(5000),
   });

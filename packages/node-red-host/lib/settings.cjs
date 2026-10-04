@@ -1,5 +1,6 @@
 const token = process.env.INTERNAL_TOKEN;
 if (!token) throw new Error("INTERNAL_TOKEN is required");
+const { callbackDestination } = require("./config.cjs");
 
 module.exports = {
   flowFile: "flows.json",
@@ -23,7 +24,7 @@ module.exports = {
         timedOut: record.output?.timedOut === true,
       });
     }
-    const response = await fetch(`${process.env.WORKER_CALLBACK_URL}/observations`, {
+    const response = await fetch(callbackDestination("/observations"), {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,

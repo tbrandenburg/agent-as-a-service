@@ -4,9 +4,10 @@ const { createInterface } = require("node:readline");
 const { mkdtemp, writeFile, rm, symlink, realpath, stat } = require("node:fs/promises");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
-const { resolveConfig, packageDir } = require("./config.cjs");
+const { resolveConfig, resolveNodeRedModules, packageDir } = require("./config.cjs");
 
 const config = resolveConfig();
+const nodeRedModules = resolveNodeRedModules();
 
 const workers = new Map();
 const starting = new Set();
@@ -143,7 +144,7 @@ async function launch(job) {
       socket.listen(0, "127.0.0.1", () => { const chosen = socket.address().port; socket.close(() => resolve(chosen)); });
     });
     checkStopped(id);
-    const child = spawn(process.execPath, [join(packageDir, "lib/worker-host.cjs"), dir, String(port), job.runId, id, String(job.sequence ?? 0)], { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true, env: { ...process.env, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
+    const child = spawn(process.execPath, [join(packageDir, "lib/worker-host.cjs"), dir, String(port), job.runId, id, String(job.sequence ?? 0)], { cwd, stdio: ["ignore", "pipe", "pipe"], detached: true, env: { ...process.env, NODE_RED_MODULES: nodeRedModules, PWD: cwd, WORKER_CWD: cwd, WORKER_RUNTIME: "true" } });
     forwardWorkerOutput(child.stdout, process.stdout, job.runId);
     forwardWorkerOutput(child.stderr, process.stderr, job.runId);
     const worker = { child, dir, port, runId: job.runId, group: child.pid, exited: false, exit: null, timeout: null };
@@ -209,6 +210,26 @@ async function read(request) {
   }
   return JSON.parse(Buffer.concat(parts, size).toString("utf8"));
 }
-if (require.main === module) process.on("SIGTERM", () => { for (const id of new Set([...workers.keys(), ...pending.keys()])) void stop(id); });
+let shutdown;
+function close(signal) {
+  if (shutdown) return shutdown;
+  shutdown = (async () => {
+    for (const id of new Set([...workers.keys(), ...pending.keys()])) {
+      try { await stop(id); }
+      catch (error) { console.error(`Worker shutdown failed (${id})`, error instanceof Error ? error.message : "unknown"); }
+    }
+    await new Promise((resolve) => {
+      if (!server.listening) return resolve();
+      server.close(resolve);
+    });
+    if (signal) process.exitCode = 0;
+  })();
+  return shutdown;
+}
+function installSignalHandlers() {
+  process.on("SIGTERM", () => { void close("SIGTERM"); });
+  process.on("SIGINT", () => { void close("SIGINT"); });
+}
+if (require.main === module) installSignalHandlers();
 async function writeSnapshot(dir, flows) { await writeFile(join(dir, "flows.json"), JSON.stringify(flows)); }
-module.exports = { stop, start, workers, pending, starting, waiting, server, listen, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit };
+module.exports = { stop, start, workers, pending, starting, waiting, server, listen, close, installSignalHandlers, forwardWorkerOutput, writeSnapshot, read, internalRequestLimit };
