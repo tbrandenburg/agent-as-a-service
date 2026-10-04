@@ -77,13 +77,12 @@ release:
 	$(MAKE) check
 	cd $(NODE_RED_HOST_PACKAGE_DIR) && npm pack --dry-run
 	cd $(NODE_RED_HOST_PACKAGE_DIR) && npm version $(BUMP) --no-git-tag-version
-	@NEW_VERSION=$(node -p "require('./$(NODE_RED_HOST_PACKAGE_JSON)').version"); \
-	npm install --package-lock-only --workspaces >/dev/null; \
-	git add $(NODE_RED_HOST_PACKAGE_JSON) package-lock.json; \
-	git commit -m "release: node-red-host v$NEW_VERSION"; \
-	git tag -a "node-red-host@$NEW_VERSION" -m "release: node-red-host v$NEW_VERSION"; \
-	echo "Tagged node-red-host@$NEW_VERSION on $(git rev-parse --short HEAD)."; \
-	echo "Next: git push --follow-tags. The tag triggers the OIDC npm publish workflow."
+	npm install --package-lock-only --workspaces >/dev/null
+	git add $(NODE_RED_HOST_PACKAGE_JSON) package-lock.json
+	git commit -m "release: node-red-host v`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"`"
+	git tag -a "node-red-host@`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"`" -m "release: node-red-host v`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"`"
+	@echo "Tagged node-red-host@`node -p \"require('./$(NODE_RED_HOST_PACKAGE_JSON)').version\"` on `git rev-parse --short HEAD`."
+	@echo "Next: git push --follow-tags. The tag triggers the OIDC npm publish workflow."
 
 lint:
 	npm run lint
