@@ -16,6 +16,7 @@ const pending = new Map();
 // Permanent IDs cannot be reused during this supervisor lifetime. Pending
 // promises/reservations are transient; tombstones carry no worker resources.
 const stopped = new Set();
+let shuttingDown = false;
 function checkStopped(id) { if (stopped.has(id)) throw new Error("Execution worker stopped"); }
 const max = config.maxWorkers;
 if (!Number.isSafeInteger(max) || max < 1 || max > 32) throw new Error("Invalid MAX_WORKERS");
@@ -107,6 +108,7 @@ async function cleanup(id, worker) {
   notifyRelease();
 }
 async function start(job, launchWorker = launch) {
+  if (shuttingDown) throw new Error("Worker host is shutting down");
   const id = job.attemptId;
   if (typeof id !== "string" || !id || workers.has(id) || starting.has(id) || waiting.has(id)) throw new Error("Duplicate or invalid execution worker");
   checkStopped(id);
@@ -181,6 +183,7 @@ async function launch(job) {
   }
 }
 const server = http.createServer(async (request, response) => {
+  if (shuttingDown) return respond(response, 503, { error: "Worker unavailable" });
   if (request.headers.authorization !== `Bearer ${process.env.INTERNAL_TOKEN}`) return respond(response, 401, { error: "Unauthorized" });
   try {
     if (request.method === "GET" && request.url === "/ready") return respond(response, 200, { ready: true });
@@ -192,6 +195,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "POST" && request.url === "/start") {
       const body = await read(request);
+      if (shuttingDown) return respond(response, 503, { error: "Worker unavailable" });
       await start(body);
       return respond(response, 202, { accepted: true });
     }
@@ -213,15 +217,17 @@ async function read(request) {
 let shutdown;
 function close(signal) {
   if (shutdown) return shutdown;
+  shuttingDown = true;
+  const serverClosed = new Promise((resolve) => {
+    if (!server.listening) return resolve();
+    server.close(resolve);
+  });
   shutdown = (async () => {
     for (const id of new Set([...workers.keys(), ...pending.keys()])) {
       try { await stop(id); }
       catch (error) { console.error(`Worker shutdown failed (${id})`, error instanceof Error ? error.message : "unknown"); }
     }
-    await new Promise((resolve) => {
-      if (!server.listening) return resolve();
-      server.close(resolve);
-    });
+    await serverClosed;
     if (signal) process.exitCode = 0;
   })();
   return shutdown;

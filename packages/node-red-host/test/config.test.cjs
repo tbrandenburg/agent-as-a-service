@@ -195,7 +195,13 @@ test("CLI keeps the launcher runtime across worker cwd changes and drains worker
   const relative = spawnSync(process.execPath, ["-e", `process.stdout.write(require(${JSON.stringify(require.resolve("../lib/config.cjs"))}).resolveNodeRedModules())`], { cwd: launcher, encoding: "utf8", env: { ...process.env, NODE_RED_MODULES: "node_modules" } });
   assert.equal(relative.status, 0, relative.stderr);
   assert.equal(relative.stdout, fs.realpathSync(runtime));
-  const callback = http.createServer((_request, response) => { response.writeHead(200); response.end("{}"); });
+  let releaseDrain;
+  let drainObserved = false;
+  const drainGate = new Promise((resolve) => { releaseDrain = resolve; });
+  const callback = http.createServer(async (request, response) => {
+    if (request.url === "/node-drain") { drainObserved = true; await drainGate; }
+    response.writeHead(200); response.end("{}");
+  });
   await new Promise((resolve) => callback.listen(0, "127.0.0.1", resolve));
   const port = callback.address().port;
   const hostPort = await new Promise((resolve) => {
@@ -208,6 +214,7 @@ test("CLI keeps the launcher runtime across worker cwd changes and drains worker
     env: { ...process.env, INTERNAL_TOKEN: token, WORKER_CALLBACK_URL: `http://127.0.0.1:${port}`, PROJECTS_ROOT: join(root, "projects"), GLOBAL_WORK_ROOT: global, PALETTE_NODE_MODULES: runtime, NODE_RED_MODULES: "", HOST: "127.0.0.1", PORT: String(hostPort), TMPDIR: temp, WORKER_TIMEOUT_MS: "30000" },
     stdio: "ignore",
   });
+  let descendantPid;
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   const workerDir = () => fs.readdirSync(temp).map((name) => join(temp, name)).find((dir) => fs.existsSync(join(dir, "settings.js")));
   const request = async (path, body) => fetch(`http://127.0.0.1:${hostPort}${path}`, { method: body ? "POST" : "GET", headers, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(body ? 30000 : 1000) });
@@ -231,7 +238,6 @@ test("CLI keeps the launcher runtime across worker cwd changes and drains worker
     await waitFor(() => workerDir() !== undefined);
     const dir = workerDir();
     assert.equal(fs.readlinkSync(join(dir, "node_modules")), fs.realpathSync(runtime));
-    let descendantPid;
     await waitFor(() => {
       for (const entry of fs.readdirSync("/proc")) {
         if (!/^\d+$/.test(entry)) continue;
@@ -241,6 +247,12 @@ test("CLI keeps the launcher runtime across worker cwd changes and drains worker
       return descendantPid !== undefined;
     });
     child.kill("SIGTERM");
+    await waitFor(() => drainObserved, 10000);
+    const secondStart = await request("/start", { runId: "shutdown-race", attemptId: "shutdown-race", flows: activeFlows, entry: "entry", input: { wait: true }, cwd: project }).catch((error) => error);
+    assert.ok(secondStart instanceof Error || secondStart.status === 503, "shutdown-time /start must be refused or its connection closed");
+    assert.notEqual(secondStart.status, 202);
+    assert.deepEqual(fs.readdirSync(temp).filter((name) => fs.existsSync(join(temp, name, "settings.js"))).map((name) => join(temp, name)), [dir]);
+    releaseDrain();
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("Host did not exit after SIGTERM")), 15000);
       child.once("exit", () => { clearTimeout(timeout); resolve(); });
@@ -249,7 +261,16 @@ test("CLI keeps the launcher runtime across worker cwd changes and drains worker
     assert.throws(() => process.kill(descendantPid, 0), { code: "ESRCH" });
     assert.equal(child.signalCode, null);
   } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    releaseDrain();
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      await Promise.race([new Promise((resolve) => child.once("exit", resolve)), new Promise((resolve) => setTimeout(resolve, 15000))]);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+    if (descendantPid !== undefined) {
+      try { process.kill(descendantPid, "SIGKILL"); }
+      catch (error) { if (error.code !== "ESRCH") console.error("Failed to clean test descendant", error); }
+    }
     await new Promise((resolve) => callback.close(resolve));
     rmSync(root, { recursive: true, force: true });
   }
