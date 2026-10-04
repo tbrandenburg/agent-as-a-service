@@ -52,7 +52,7 @@ export async function runControlAcceptance(
         "node-red",
         "node",
         "-e",
-        `const fs=require('node:fs'); const id=process.argv[1]; const matches=fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p)).filter(p=>{try{const args=fs.readFileSync('/proc/'+p+'/cmdline','utf8').split('\\0');return args.includes('/seed/worker-host.js')&&args.includes(id);}catch(e){if(e.code==='ENOENT'||e.code==='ESRCH')return false;throw e;}});process.stdout.write(JSON.stringify(matches));`,
+        `const fs=require('node:fs'); const id=process.argv[1]; const matches=fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p)).filter(p=>{try{const args=fs.readFileSync('/proc/'+p+'/cmdline','utf8').split('\\0');return args.some(a=>a.endsWith('/node-red-host/lib/worker-host.cjs'))&&args.includes(id);}catch(e){if(e.code==='ENOENT'||e.code==='ESRCH')return false;throw e;}});process.stdout.write(JSON.stringify(matches));`,
         id,
       ],
       { timeout: 15_000 },

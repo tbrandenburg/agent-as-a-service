@@ -1,0 +1,21 @@
+{
+  "name": "@agent-as-a-service/node-red-host",
+  "version": "0.1.0",
+  "description": "Disposable execution host for a separately installed Node-RED runtime",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "aaas-node-red-host": "bin/aaas-node-red-host.cjs"
+  },
+  "files": ["bin/", "lib/", "LICENSE", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "build:validator": "esbuild ../../packages/contract/src/v1/schemas/domain.ts --bundle --platform=node --format=cjs --minify --outfile=lib/run-output.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

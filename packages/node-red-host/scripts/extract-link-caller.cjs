@@ -7,7 +7,7 @@ const { execFileSync } = require("node:child_process");
 // Extract native Link Call without the CLI's single-tab/static-wires preflight.
 const integrity = "ZPtIyjuKo6bzeax9IHXKhWGsXV7z+6OcWnoNWs9TJTFm0Dq5vTHAJpiuxDtFUrG4aZoaMxmMD8z/bbCL3cid5A==";
 async function extract() {
-  const destination = process.argv[2];
+  const destination = process.argv[2] || join(__dirname, "../lib");
   if (!destination) throw new Error("Adapter destination required");
   const response = await fetch("https://registry.npmjs.org/@tbrandenburg/node-red-cli/-/node-red-cli-0.2.18.tgz", { signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Adapter download failed (${response.status})`);

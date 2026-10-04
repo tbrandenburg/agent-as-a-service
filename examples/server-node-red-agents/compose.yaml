@@ -24,6 +24,11 @@ services:
       DEFAULT_MODEL: ${DEFAULT_MODEL-opencode/big-pickle}
       API_TOKEN: ${API_TOKEN:-dev-token}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-observer-demo-token}
+      WORKER_CALLBACK_URL: http://api:3095
+      PROJECTS_ROOT: /data/projects
+      GLOBAL_WORK_ROOT: /data/agent-work
+      NODE_RED_MODULES: /usr/src/node-red/node_modules
+      PALETTE_NODE_MODULES: /data/node_modules
       MAX_WORKERS: ${MAX_WORKERS:-4}
       NODE_RED_WORKER_METRICS: ${NODE_RED_WORKER_METRICS:-false}
       WORKER_TIMEOUT_MS: ${WORKER_TIMEOUT_MS:-450000}
