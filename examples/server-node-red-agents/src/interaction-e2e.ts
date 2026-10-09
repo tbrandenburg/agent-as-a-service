@@ -8,10 +8,12 @@ const compose = [
   "compose",
   "-p",
   project,
-  "-f",
-  "examples/server-node-red-agents/compose.yaml",
-  "-f",
-  "examples/server-node-red-agents/node-red/fixtures/compose.native.yaml",
+  ...(
+    process.env.NODE_RED_COMPOSE_FILES ??
+    "examples/server-node-red-agents/compose.yaml,examples/server-node-red-agents/node-red/fixtures/compose.native.yaml"
+  )
+    .split(",")
+    .flatMap((file) => ["-f", file]),
 ];
 const sleep = () => new Promise((resolve) => setTimeout(resolve, 100));
 async function http(
