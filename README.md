@@ -86,8 +86,8 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make demo-node-red` | Build Docker and run the private Node-RED workflow walkthrough. |
 | `make demo-node-red-agents` | Build Docker and run the real lifecycle-observed agent walkthrough. |
 | `make smoke-node-red-agents` | Run one provider-free multiplication roundtrip, report timings and clean up. |
-| `make spawn-node-red-agents` | Start a persistent API/Node-RED pair with a generated name (requires three distinct tokens). |
-| `make start-node-red-agents INSTANCE=name` | Start a named API/Node-RED pair (requires three distinct tokens). |
+| `make spawn-node-red-agents` | Start a persistent API/Node-RED pair with a generated name (requires two distinct tokens: `API_TOKEN` and `INTERNAL_TOKEN`). |
+| `make start-node-red-agents INSTANCE=name` | Start a named API/Node-RED pair (requires two distinct tokens: `API_TOKEN` and `INTERNAL_TOKEN`). |
 | `make status-node-red-agents INSTANCE=name` / `make logs-node-red-agents INSTANCE=name` | Locate its URL and inspect its containers/logs. |
 | `make stop-node-red-agents INSTANCE=name` / `make cleanup-node-red-agents INSTANCE=name` | Stop one project, retaining its volumes, or remove its volumes too. |
 | `make start` / `make dev` | Start the Express example normally or in watch mode. |
