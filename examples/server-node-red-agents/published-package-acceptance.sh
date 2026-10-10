@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="$(npm view @tbrandenburg/node-red-host@0.1.1 version)"
-test "$version" = "0.1.1"
 project="aas-published-${RANDOM}-${RANDOM}-$$"
 image="aas-published-node-red-host:${RANDOM}-${RANDOM}-$$"
 evidence="${EVIDENCE_DIR:-/tmp/opencode/$project}"
+if [[ -z "${EVIDENCE_DIR:-}" ]]; then
+  mkdir -p /tmp/opencode
+fi
+if ! mkdir -- "$evidence"; then
+  echo "Evidence directory must not already exist: $evidence" >&2
+  exit 1
+fi
+version="$(npm view @tbrandenburg/node-red-host@0.1.1 version)"
+test "$version" = "0.1.1"
 export COMPOSE_PROJECT_NAME="$project"
 export DEMO_COMPOSE_PROJECT="$project"
 export CONSUMER_IMAGE="$image"
@@ -14,7 +21,6 @@ export INTERNAL_TOKEN="$(openssl rand -hex 32)"
 test "$API_TOKEN" != "$INTERNAL_TOKEN"
 export MAX_WORKERS=1
 export NODE_RED_COMPOSE_FILES="examples/server-node-red-agents/compose.yaml,examples/server-node-red-agents/node-red/fixtures/compose.native.yaml,examples/server-node-red-agents/node-red/compose.consumer.yaml"
-mkdir -p "$evidence"
 compose=(docker compose -p "$project" -f examples/server-node-red-agents/compose.yaml -f examples/server-node-red-agents/node-red/fixtures/compose.native.yaml -f examples/server-node-red-agents/node-red/compose.consumer.yaml)
 
 cleanup() {
@@ -30,11 +36,30 @@ cleanup() {
 const fs = require("node:fs");
 const path = require("node:path");
 const [directory, ...secrets] = process.argv.slice(2);
-for (const file of fs.readdirSync(directory)) {
+const files = [
+  "listeners-before.log",
+  "storage.log",
+  "compose-config.json",
+  "build.log",
+  "start.log",
+  "package-version.log",
+  "registry.log",
+  "interaction-http.log",
+  "native-http.log",
+  "final-capacity.log",
+  "attempts.log",
+  "lifecycle.log",
+  "containers.log",
+  "cleanup.log",
+];
+for (const file of files) {
   const target = path.join(directory, file);
-  if (!fs.statSync(target).isFile()) continue;
+  if (!fs.existsSync(target)) continue;
+  if (!fs.lstatSync(target).isFile()) continue;
   let value = fs.readFileSync(target, "utf8");
-  for (const secret of secrets) value = value.replaceAll(secret, "<redacted>");
+  for (const secret of secrets) {
+    value = value.replaceAll(secret, "<redacted>");
+  }
   fs.writeFileSync(target, value);
 }
 NODE
