@@ -9,3 +9,5 @@ Required configuration: `INTERNAL_TOKEN`, `WORKER_CALLBACK_URL`, `PROJECTS_ROOT`
 Optional configuration: `MAX_WORKERS` (4), `WORKER_TIMEOUT_MS` (450000), `PORT` (1881), `HOST` (`0.0.0.0`), and `NODE_RED_WORKER_METRICS` (`false`). The configured project/global roots must exist and be mounted in the host container.
 
 Run with `aaas-node-red-host`. The package uses stock Node-RED embedding (`RED.init` / `RED.start`) and does not install palette nodes or restart failed executions.
+
+<!-- Temporary host-only workflow trigger verification. -->
