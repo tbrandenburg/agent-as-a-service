@@ -5,6 +5,7 @@ on:
     paths:
       - 'examples/server-node-red-agents/**'
       - 'packages/contract/**'
+      - 'packages/node-red-host/**'
       - 'package*.json'
       - '.dockerignore'
       - '.github/workflows/node-red-example.yml'

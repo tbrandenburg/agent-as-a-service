@@ -1,0 +1,22 @@
+services:
+  node-red:
+    build: !override
+      context: ./node-red
+      dockerfile: Dockerfile.consumer
+    image: ${CONSUMER_IMAGE:?CONSUMER_IMAGE must be unique for this acceptance run}
+    environment:
+      DEFAULT_MODEL: ""
+      WORKER_CALLBACK_URL: http://api:3095
+      PROJECTS_ROOT: /data/projects
+      GLOBAL_WORK_ROOT: /data/agent-work
+      NODE_RED_MODULES: /usr/src/node-red/node_modules
+      PALETTE_NODE_MODULES: /data/node_modules
+      MAX_WORKERS: ${MAX_WORKERS:-1}
+      NODE_RED_WORKER_METRICS: "true"
+      WORKER_TIMEOUT_MS: 30000
+    volumes: !override
+      - node-red-data:/data
+      - projects:/data/projects
+      - global-work:/data/agent-work
+    command:
+      - "set -e; mkdir -p /data/agent-work /data/projects; exec aaas-node-red-host"

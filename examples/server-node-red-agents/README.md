@@ -79,6 +79,16 @@ Builds a project-unique Docker Compose instance with an ephemeral localhost API 
 
 Evidence is written to the printed `/tmp/opencode/aas-interaction-...` directory: `http.log`, `lifecycle.log`, `attempts.log`, build/container logs and cleanup confirmation. `EVIDENCE_DIR` can select another existing-parent output location. Tokens are generated per invocation and never printed.
 
+### Published host package consumer acceptance
+
+```sh
+bash examples/server-node-red-agents/published-package-acceptance.sh
+```
+
+This disposable manual check confirms `@tbrandenburg/node-red-host@0.1.1` from npm inside a fresh `nodered/node-red:5.0.7` consumer image; it never copies or mounts the workspace host package. It installs the published `@tbrandenburg/node-red-agents@0.4.4` palette, runs native multiplication from the existing fixture and the provider-free Interaction HTTP acceptance at `MAX_WORKERS=1`, and requires all private attempts and worker capacity to return to zero. The API alone receives an ephemeral localhost port. Docker Compose, npm registry access, curl, openssl, `ss`, and installed workspace dependencies are required; no provider credentials or model calls are used.
+
+The script inspects and stores a token-redacted effective Compose configuration before startup. It writes package versions, HTTP acceptance output, attempt lifecycle, container/build logs and cleanup confirmation to the printed `/tmp/opencode/aas-published-...` evidence directory. It removes only its uniquely named Compose project, volumes, network and image. `EVIDENCE_DIR` can select another existing-parent output location.
+
 ## Human Interactions
 
 The existing `GET /api/v1/interactions` returns pending Interactions from paused Runs with pagination and optional `projectId`. Prompt and ordered decision IDs come from the node's v1 plan; labels remain Node-RED configuration. Submit a declared choice through:

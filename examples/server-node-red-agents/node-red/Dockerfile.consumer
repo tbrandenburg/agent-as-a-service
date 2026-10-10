@@ -1,0 +1,14 @@
+FROM nodered/node-red:5.0.7
+
+USER root
+RUN npm install --global @tbrandenburg/node-red-host@0.1.1 \
+    && npm install --prefix /data --omit=dev @tbrandenburg/node-red-agents@0.4.4 \
+    && npm ls --global @tbrandenburg/node-red-host \
+    && npm ls --prefix /data @tbrandenburg/node-red-agents \
+    && node -p "require('/usr/src/node-red/node_modules/node-red/package.json').version"
+RUN mkdir -p /data/projects /data/agent-work \
+    && chown -R node-red:node-red /data
+
+USER node-red
+ENTRYPOINT ["sh", "-c"]
+CMD ["set -e; mkdir -p /data/projects /data/agent-work; exec aaas-node-red-host"]
