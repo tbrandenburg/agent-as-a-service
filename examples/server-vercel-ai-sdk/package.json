@@ -1,0 +1,12 @@
+{
+  "name": "@agent-as-a-service/example-server-vercel-ai-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@agent-as-a-service/contract": "0.1.0",
+    "@agent-as-a-service/example-server-express": "0.1.0",
+    "@ai-sdk/openai": "^3.0.0",
+    "ai": "^6.0.0"
+  }
+}

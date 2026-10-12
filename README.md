@@ -8,7 +8,7 @@ Use it as a typed API specification when building an agent backend or client. Th
 
 [OpenAPI](openapi.json) · [Endpoint catalog](docs/catalog.md) · [Design decisions](docs/design.md) · [MIT License](LICENSE)
 
-> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; [`server-opencode`](examples/server-opencode) runs OpenCode for conversation messages, [`server-node-red`](examples/server-node-red) runs one fixed workflow through a private Node-RED container, and [`server-node-red-agents`](examples/server-node-red-agents) discovers conversations from generic Node-RED agent lifecycle observations.
+> This repository is a contract and example implementation, not a hosted service or ready-to-run agent platform. The standard Express example returns `501 Not Implemented` for resource operations. The simulated demo is in-memory; [`server-opencode`](examples/server-opencode) runs OpenCode for conversation messages, [`server-vercel-ai-sdk`](examples/server-vercel-ai-sdk) runs synchronous GPT-6 Luna requests, [`server-node-red`](examples/server-node-red) runs one fixed workflow through a private Node-RED container, and [`server-node-red-agents`](examples/server-node-red-agents) discovers conversations from generic Node-RED agent lifecycle observations.
 
 ## What the contract covers
 
@@ -55,6 +55,8 @@ make demo-express
 
 `DEFAULT_MODEL=github-copilot/gpt-6-luna make demo-node-red-agents` verifies native Node-RED workflows and real OpenCode sessions in a disposable Compose project with a dynamic loopback API port. Primary execution supports workflow targets only; the server-owned read-only `core` workflow bootstraps conversations through its `orchestrator` agent. Definitions store `{entry, flows}` using complete native editor exports; CRUD has no shared deployment, and runs use immutable versioned snapshots. Run input/output accept arbitrary JSON values, including numbers, booleans, null and arrays. Operators can seed provider authentication from gitignored `.home/`. Each workflow run has a separate bounded worker whose cwd is chosen only by explicit `run.projectId` (or the global default); same-project runs may overlap. Persistent instances use `make spawn-node-red-agents` or `make start-node-red-agents INSTANCE=alpha` with distinct `API_TOKEN` and `INTERNAL_TOKEN`. See [/examples/server-node-red-agents/README.md](/examples/server-node-red-agents/README.md) for native workflow examples, acceptance, projects and persistence.
 
+`API_TOKEN=dev-token npm run start:vercel-ai-sdk` starts the synchronous Vercel AI SDK example on `127.0.0.1:3096`. It calls OpenAI directly with the configured `OPENAI_API_KEY`, returns a completed run in the POST's 202 response, and keeps results in memory. See [`examples/server-vercel-ai-sdk/README.md`](examples/server-vercel-ai-sdk/README.md) for its limits and request examples.
+
 `make smoke-node-red-agents` runs one provider-free multiplication roundtrip against a fresh Docker instance using the typed HTTP contract client. It verifies `13.75 × -8 = -110`, prints phase timings and a machine-readable `SMOKE_RESULT` JSON record, and removes its own containers, volumes and image tags. See [smoke timing definitions](/examples/server-node-red-agents/README.md#timed-contract-smoke).
 
 The Node-RED agents example supports conversation CRUD and plain-text `sendMessage`: a metadata-only Core conversation bootstraps on its first turn, and established sessions continue best effort through a tiny wrapper around the exact current source agent. Each turn has a targetless tracked run, inherits the conversation project, and persists its accepted user message plus assistant reply only on successful finalization with confirmed provider resume for later turns. It never reruns the originating workflow. Cancellation, soft deletion and endpoint-scoped idempotency preserve history and original acceptance responses. `startRun` with `conversationId` remains typed `501`; run resume returns `409 run_not_resumable`. See [conversations](/examples/server-node-red-agents/README.md#conversation-turns) and [run controls](/examples/server-node-red-agents/README.md#run-controls).
@@ -92,6 +94,7 @@ It listens on `http://127.0.0.1:3091` by default. Configure `HOST`, `PORT`, and 
 | `make stop-node-red-agents INSTANCE=name` / `make cleanup-node-red-agents INSTANCE=name` | Stop one project, retaining its volumes, or remove its volumes too. |
 | `make start` / `make dev` | Start the Express example normally or in watch mode. |
 | `make start-opencode` | Start the OpenCode-backed example server locally. |
+| `npm run start:vercel-ai-sdk` | Start the synchronous GPT-6 Luna example (requires `OPENAI_API_KEY` and `API_TOKEN`). |
 | `make start-node-red` | Start the Node-RED-backed API server locally (requires Node-RED reachable at `NODE_RED_URL`). |
 | `make help` | List the main targets. |
 

@@ -20,6 +20,7 @@
     "start:node-red-agents": "node --import tsx examples/server-node-red-agents/src/main.ts",
     "start:node-red": "node --import tsx examples/server-node-red/src/main.ts",
     "start:opencode": "node --import tsx examples/server-opencode/src/main.ts",
+    "start:vercel-ai-sdk": "node --import tsx examples/server-vercel-ai-sdk/src/main.ts",
     "dev": "node --watch --import tsx examples/server-express/src/main.ts",
     "validate:openapi": "node --import tsx scripts/validate-openapi.ts",
     "check:parity": "node --import tsx scripts/check-parity.ts",
