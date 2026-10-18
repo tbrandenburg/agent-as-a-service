@@ -53,7 +53,7 @@ test('catalog, structured dispatch, A2A Task, approval, cancellation and safety'
   async function call(path, method = 'GET', body, token = 'fake-token') {
     const resp = await fetch(`${api}${path}`, { method,
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/a2a+json' },
-      body: body ? JSON.stringify(body) : undefined });
+      ...(method === 'GET' || body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { code: resp.status, result: await resp.json() };
   }
   function msg(data, extra = {}) {

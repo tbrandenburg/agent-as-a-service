@@ -23,7 +23,7 @@ async function http(path, { method = 'GET', body } = {}) {
   const result = await fetch(`${base}${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/a2a+json' }) },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(method === 'GET' || body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(30000),
   });
   let data;
