@@ -53,7 +53,7 @@ bash scripts/demo-node-red-a2a-poc.sh
 This builds the **same** disposable Node-RED agents Compose backend used by the original
 `scripts/demo-node-red-apis.sh`, generates fresh API/internal bearer tokens, starts the bridge
 on a loopback port, runs the structured-command walkthrough and tears down its containers,
-volumes and local image tags. Evidence is saved under `/tmp/opencode/aas-a2a-poc-*//`.
+volumes and local image tags. Evidence is saved under `/tmp/opencode/aas-a2a-poc-*/`.
 
 By default, the provider-backed agent turn is skipped to keep the PoC provider-free. To
 exercise **all 34** contract operations, including a real agent message, configure the
